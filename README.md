@@ -1,6 +1,6 @@
-# Jet - JIRA CLI Tool
+# Jira Jet - Fast JIRA CLI Tool
 
-A fast and simple command-line tool for interacting with JIRA. Built in Go, compiles to a single binary with no dependencies.
+A blazing fast command-line interface for JIRA operations. Written in Go, compiles to a single binary with zero runtime dependencies.
 
 ## Features
 
@@ -187,13 +187,43 @@ The tool provides clear error messages for common issues:
 ## Development
 
 Built with:
-- Go 1.24+
+- Go 1.21+
 - [Cobra](https://github.com/spf13/cobra) for CLI framework
 - Standard library for HTTP and JSON handling
 
-To contribute or modify:
+### Quick Start
 
-1. Make your changes
-2. Test with `go run . [command]`
-3. Build with `go build -o jet`
-4. Test the binary with `./jet [command]`
+```bash
+# Clone the repository
+git clone git@github.com:drakeaharper/ira-jet.git
+cd ira-jet
+
+# Build the binary
+go build -o jet
+
+# Run tests
+go test ./...
+
+# Install locally
+go install
+```
+
+### Project Structure
+
+```
+.
+├── cmd/          # Command implementations
+├── internal/     # Internal packages
+│   ├── config/   # Configuration handling
+│   └── jira/     # JIRA API client
+├── main.go       # Entry point
+└── jet           # Compiled binary
+```
+
+## License
+
+MIT License - see LICENSE file for details.
+
+## Contributing
+
+Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
