@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/fatih/color"
@@ -181,7 +182,8 @@ func formatIssueReadable(issue *jira.Issue) string {
 		output.WriteString("\n")
 		output.WriteString(yellow.Sprint("📖 Description:\n"))
 		output.WriteString(gray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
-		output.WriteString(issue.Fields.Description + "\n")
+		formattedDescription := formatHTMLContent(issue.Fields.Description)
+		output.WriteString(formattedDescription + "\n")
 	}
 
 	// Attachments
@@ -238,7 +240,8 @@ func formatIssueReadable(issue *jira.Issue) string {
 			}
 			
 			output.WriteString(fmt.Sprintf("%s %s (%s):\n", yellow.Sprintf("%d.", i+1), authorName, gray.Sprint(created)))
-			output.WriteString(fmt.Sprintf("   %s\n\n", comment.Body))
+			formattedComment := formatHTMLContent(comment.Body)
+			output.WriteString(fmt.Sprintf("   %s\n\n", formattedComment))
 		}
 	}
 
@@ -289,6 +292,156 @@ func formatFileSize(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// formatHTMLContent formats HTML-like content and wiki markup for better readability
+func formatHTMLContent(content string) string {
+	if content == "" {
+		return content
+	}
+
+	// Define colors for formatting
+	headerColor := color.New(color.FgCyan, color.Bold)
+	subHeaderColor := color.New(color.FgBlue, color.Bold)
+	emphasisColor := color.New(color.FgYellow)
+	linkColor := color.New(color.FgGreen, color.Underline)
+
+	// Handle Atlassian/Confluence wiki markup headers first
+	content = regexp.MustCompile(`(?m)^h1\.\s*(.+)$`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`(?m)^h1\.\s*(.+)$`).ReplaceAllString(match, "$1")
+		return headerColor.Sprintf("# %s", text)
+	})
+
+	content = regexp.MustCompile(`(?m)^h2\.\s*(.+)$`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`(?m)^h2\.\s*(.+)$`).ReplaceAllString(match, "$1")
+		return headerColor.Sprintf("## %s", text)
+	})
+
+	content = regexp.MustCompile(`(?m)^h3\.\s*(.+)$`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`(?m)^h3\.\s*(.+)$`).ReplaceAllString(match, "$1")
+		return subHeaderColor.Sprintf("### %s", text)
+	})
+
+	content = regexp.MustCompile(`(?m)^h4\.\s*(.+)$`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`(?m)^h4\.\s*(.+)$`).ReplaceAllString(match, "$1")
+		return subHeaderColor.Sprintf("#### %s", text)
+	})
+
+	content = regexp.MustCompile(`(?m)^h5\.\s*(.+)$`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`(?m)^h5\.\s*(.+)$`).ReplaceAllString(match, "$1")
+		return subHeaderColor.Sprintf("##### %s", text)
+	})
+
+	content = regexp.MustCompile(`(?m)^h6\.\s*(.+)$`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`(?m)^h6\.\s*(.+)$`).ReplaceAllString(match, "$1")
+		return subHeaderColor.Sprintf("###### %s", text)
+	})
+
+	// Handle wiki markup formatting
+	content = regexp.MustCompile(`\*([^*]+)\*`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`\*([^*]+)\*`).ReplaceAllString(match, "$1")
+		return emphasisColor.Sprintf("• %s", text)
+	})
+
+	// Handle wiki markup code blocks
+	content = regexp.MustCompile(`\{\{([^}]+)\}\}`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`\{\{([^}]+)\}\}`).ReplaceAllString(match, "$1")
+		return color.New(color.FgHiBlack, color.BgWhite).Sprintf(" %s ", text)
+	})
+
+	// Replace HTML headers with colored versions
+	content = regexp.MustCompile(`<h1[^>]*>(.*?)</h1>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<h1[^>]*>(.*?)</h1>`).ReplaceAllString(match, "$1")
+		return "\n" + headerColor.Sprintf("# %s", text) + "\n"
+	})
+
+	content = regexp.MustCompile(`<h2[^>]*>(.*?)</h2>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<h2[^>]*>(.*?)</h2>`).ReplaceAllString(match, "$1")
+		return "\n" + headerColor.Sprintf("## %s", text) + "\n"
+	})
+
+	content = regexp.MustCompile(`<h3[^>]*>(.*?)</h3>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<h3[^>]*>(.*?)</h3>`).ReplaceAllString(match, "$1")
+		return "\n" + subHeaderColor.Sprintf("### %s", text) + "\n"
+	})
+
+	content = regexp.MustCompile(`<h4[^>]*>(.*?)</h4>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<h4[^>]*>(.*?)</h4>`).ReplaceAllString(match, "$1")
+		return "\n" + subHeaderColor.Sprintf("#### %s", text) + "\n"
+	})
+
+	// Replace other HTML elements
+	content = regexp.MustCompile(`<strong[^>]*>(.*?)</strong>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<strong[^>]*>(.*?)</strong>`).ReplaceAllString(match, "$1")
+		return emphasisColor.Sprintf("**%s**", text)
+	})
+
+	content = regexp.MustCompile(`<b[^>]*>(.*?)</b>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<b[^>]*>(.*?)</b>`).ReplaceAllString(match, "$1")
+		return emphasisColor.Sprintf("**%s**", text)
+	})
+
+	content = regexp.MustCompile(`<em[^>]*>(.*?)</em>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<em[^>]*>(.*?)</em>`).ReplaceAllString(match, "$1")
+		return emphasisColor.Sprintf("*%s*", text)
+	})
+
+	content = regexp.MustCompile(`<i[^>]*>(.*?)</i>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<i[^>]*>(.*?)</i>`).ReplaceAllString(match, "$1")
+		return emphasisColor.Sprintf("*%s*", text)
+	})
+
+	// Handle links
+	content = regexp.MustCompile(`<a[^>]*href=["']([^"']*)["'][^>]*>(.*?)</a>`).ReplaceAllStringFunc(content, func(match string) string {
+		re := regexp.MustCompile(`<a[^>]*href=["']([^"']*)["'][^>]*>(.*?)</a>`)
+		matches := re.FindStringSubmatch(match)
+		if len(matches) >= 3 {
+			return linkColor.Sprintf("[%s](%s)", matches[2], matches[1])
+		}
+		return match
+	})
+
+	// Handle line breaks
+	content = regexp.MustCompile(`<br\s*/?>`).ReplaceAllString(content, "\n")
+	content = regexp.MustCompile(`<br[^>]*>`).ReplaceAllString(content, "\n")
+
+	// Handle paragraphs
+	content = regexp.MustCompile(`<p[^>]*>(.*?)</p>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<p[^>]*>(.*?)</p>`).ReplaceAllString(match, "$1")
+		return "\n" + text + "\n"
+	})
+
+	// Handle lists
+	content = regexp.MustCompile(`<ul[^>]*>`).ReplaceAllString(content, "\n")
+	content = regexp.MustCompile(`</ul>`).ReplaceAllString(content, "\n")
+	content = regexp.MustCompile(`<ol[^>]*>`).ReplaceAllString(content, "\n")
+	content = regexp.MustCompile(`</ol>`).ReplaceAllString(content, "\n")
+	content = regexp.MustCompile(`<li[^>]*>(.*?)</li>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<li[^>]*>(.*?)</li>`).ReplaceAllString(match, "$1")
+		return "• " + text + "\n"
+	})
+
+	// Handle code blocks and inline code
+	content = regexp.MustCompile(`<code[^>]*>(.*?)</code>`).ReplaceAllStringFunc(content, func(match string) string {
+		text := regexp.MustCompile(`<code[^>]*>(.*?)</code>`).ReplaceAllString(match, "$1")
+		return color.New(color.FgHiBlack, color.BgWhite).Sprintf(" %s ", text)
+	})
+
+	// Handle div and span by just removing tags but keeping content
+	content = regexp.MustCompile(`<div[^>]*>`).ReplaceAllString(content, "")
+	content = regexp.MustCompile(`</div>`).ReplaceAllString(content, "\n")
+	content = regexp.MustCompile(`<span[^>]*>(.*?)</span>`).ReplaceAllStringFunc(content, func(match string) string {
+		return regexp.MustCompile(`<span[^>]*>(.*?)</span>`).ReplaceAllString(match, "$1")
+	})
+
+	// Clean up any remaining simple tags
+	content = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(content, "")
+
+	// Clean up excessive newlines
+	content = regexp.MustCompile(`\n{3,}`).ReplaceAllString(content, "\n\n")
+	content = strings.TrimSpace(content)
+
+	return content
 }
 
 func init() {

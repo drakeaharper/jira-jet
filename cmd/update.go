@@ -16,12 +16,12 @@ var (
 	updateDescFile    string
 )
 
-var updateCmd = &cobra.Command{
-	Use:   "update TICKET-KEY",
-	Short: "Update a JIRA ticket",
-	Long: `Update fields of a JIRA ticket.
+var editCmd = &cobra.Command{
+	Use:   "edit TICKET-KEY",
+	Short: "Edit a JIRA ticket",
+	Long: `Edit fields of a JIRA ticket.
 	
-Currently supports updating the description field.`,
+Currently supports editing the description field.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ticketKey := args[0]
@@ -75,8 +75,8 @@ Currently supports updating the description field.`,
 }
 
 func init() {
-	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(editCmd)
 	
-	updateCmd.Flags().StringVar(&updateDescription, "description", "", "New description for the ticket")
-	updateCmd.Flags().StringVar(&updateDescFile, "description-file", "", "Read new description from file (use '-' for stdin)")
+	editCmd.Flags().StringVar(&updateDescription, "description", "", "New description for the ticket")
+	editCmd.Flags().StringVar(&updateDescFile, "description-file", "", "Read new description from file (use '-' for stdin)")
 }
