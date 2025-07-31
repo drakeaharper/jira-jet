@@ -19,12 +19,25 @@ var (
 )
 
 var viewCmd = &cobra.Command{
-	Use:   "view TICKET-KEY",
+	Use:   "view TICKET-KEY|URL",
 	Short: "View a JIRA ticket",
-	Long:  `Fetch and display information about a JIRA ticket.`,
+	Long:  `Fetch and display information about a JIRA ticket.
+You can provide either a ticket key (e.g., LX-2894) or a full JIRA URL (e.g., https://instructure.atlassian.net/browse/LX-2894).`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ticketKey := args[0]
+
+		// Check if the argument is a URL and extract the ticket key
+		if strings.Contains(ticketKey, "://") {
+			// Extract ticket key from URL (e.g., https://instructure.atlassian.net/browse/LX-2894)
+			re := regexp.MustCompile(`/browse/([A-Z]+-\d+)`)
+			matches := re.FindStringSubmatch(ticketKey)
+			if len(matches) > 1 {
+				ticketKey = matches[1]
+			} else {
+				return fmt.Errorf("invalid JIRA URL format. Expected format: https://domain.atlassian.net/browse/TICKET-123")
+			}
+		}
 
 		// Load configuration
 		cfg, err := config.Load()
