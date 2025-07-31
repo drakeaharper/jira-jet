@@ -62,6 +62,22 @@ func Load() (*Config, error) {
 }
 
 func loadFromFile(filename string) (*Config, error) {
+	// Check file permissions
+	fileInfo, err := os.Stat(filename)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Warn if file permissions are too permissive
+	mode := fileInfo.Mode()
+	if mode.Perm()&0077 != 0 {
+		// Try to fix permissions automatically
+		if err := os.Chmod(filename, 0600); err != nil {
+			return nil, fmt.Errorf("config file has insecure permissions and could not be fixed: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Warning: Fixed insecure permissions on %s (now 0600)\n", filename)
+	}
+	
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err

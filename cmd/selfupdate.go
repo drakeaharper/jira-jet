@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -19,6 +21,26 @@ This command will:
 2. Replace the existing jet binary with the new version
 3. Verify the installation`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Println("🚀 Self-Update Security Warning")
+		fmt.Println("================================")
+		fmt.Println("This command will rebuild and replace the current jet binary.")
+		fmt.Println("Only proceed if you trust the current source code.")
+		fmt.Println("Make sure you are in a trusted project directory.")
+		fmt.Println()
+		
+		// Confirmation prompt
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Print("Do you want to continue? (type 'yes' to confirm): ")
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read input: %w", err)
+		}
+		
+		if strings.TrimSpace(strings.ToLower(response)) != "yes" {
+			fmt.Println("Update cancelled.")
+			return nil
+		}
+		
 		fmt.Println("🚀 Updating jet binary...")
 
 		// Get the path of the current jet binary

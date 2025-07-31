@@ -65,6 +65,9 @@ token = your-api-token
 # Human-readable format (default)
 jet view PROJ-123
 
+# Using full JIRA URL
+jet view https://company.atlassian.net/browse/PROJ-123
+
 # JSON format
 jet view PROJ-123 --format json
 
@@ -119,9 +122,9 @@ jet create --project PROJ --summary "Feature" --description-file spec.md
 
 ## Commands
 
-### `jet view TICKET-KEY`
+### `jet view TICKET-KEY|URL`
 
-Fetch and display ticket information.
+Fetch and display ticket information. Accepts either a ticket key (e.g., PROJ-123) or a full JIRA URL.
 
 **Flags:**
 - `--format`: Output format (`readable` or `json`)
@@ -174,6 +177,25 @@ jet create --project ABC --summary "Login fails on Safari" --type Bug --descript
 # Update ticket description from stdin
 cat new-description.txt | jet update ABC-123 --description-file -
 ```
+
+## Security
+
+### Credential Storage
+- Config files are automatically created with secure permissions (0600)
+- API tokens are stored in plaintext - keep config files secure
+- Use environment variables for better security in shared environments
+- Never commit credentials to version control
+
+### Network Security
+- All connections use HTTPS with TLS 1.2+ and secure cipher suites
+- URL validation ensures only trusted JIRA domains are accepted
+- Self-update command requires explicit confirmation for security
+
+### Best Practices
+- Use API tokens instead of passwords
+- Regularly rotate your API tokens
+- Limit API token scope to minimum required permissions
+- Monitor JIRA access logs for suspicious activity
 
 ## Error Handling
 

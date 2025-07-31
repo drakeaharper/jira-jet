@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -22,14 +23,30 @@ var viewCmd = &cobra.Command{
 	Use:   "view TICKET-KEY|URL",
 	Short: "View a JIRA ticket",
 	Long:  `Fetch and display information about a JIRA ticket.
-You can provide either a ticket key (e.g., LX-2894) or a full JIRA URL (e.g., https://instructure.atlassian.net/browse/LX-2894).`,
+You can provide either a ticket key (e.g., LX-2894) or a full JIRA URL (e.g., https://company.atlassian.net/browse/ABC-123).`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ticketKey := args[0]
 
 		// Check if the argument is a URL and extract the ticket key
 		if strings.Contains(ticketKey, "://") {
-			// Extract ticket key from URL (e.g., https://instructure.atlassian.net/browse/LX-2894)
+			// Validate URL format
+			parsedURL, err := url.Parse(ticketKey)
+			if err != nil {
+				return fmt.Errorf("invalid URL format: %w", err)
+			}
+			
+			// Ensure it's HTTPS
+			if parsedURL.Scheme != "https" {
+				return fmt.Errorf("only HTTPS URLs are allowed for security")
+			}
+			
+			// Validate it looks like a JIRA URL
+			if !strings.Contains(parsedURL.Host, "atlassian.net") && !strings.HasSuffix(parsedURL.Host, "jira.com") {
+				return fmt.Errorf("URL must be from a recognized JIRA domain (atlassian.net or jira.com)")
+			}
+			
+			// Extract ticket key from URL (e.g., https://company.atlassian.net/browse/ABC-123)
 			re := regexp.MustCompile(`/browse/([A-Z]+-\d+)`)
 			matches := re.FindStringSubmatch(ticketKey)
 			if len(matches) > 1 {

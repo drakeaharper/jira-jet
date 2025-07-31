@@ -2,6 +2,7 @@ package jira
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -140,12 +141,31 @@ type AddCommentRequest struct {
 }
 
 func NewClient(baseURL, email, username, token string) *Client {
+	// Configure secure TLS settings
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+		},
+		PreferServerCipherSuites: true,
+	}
+	
+	transport := &http.Transport{
+		TLSClientConfig: tlsConfig,
+	}
+	
 	return &Client{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		Email:      email,
 		Username:   username,
 		Token:      token,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: transport,
+		},
 	}
 }
 
@@ -175,6 +195,7 @@ func (c *Client) makeRequest(method, endpoint string, body interface{}) (*http.R
 	}
 
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "jira-jet/1.0 (Security-Enhanced)")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -305,8 +326,8 @@ func (c *Client) CreateIssue(projectKey, summary, description, issueType, epicKe
 		return nil, fmt.Errorf("access denied - you may not have permission to create issues in this project")
 	}
 	if resp.StatusCode != 201 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("HTTP %d: failed to create issue - %s", resp.StatusCode, string(body))
+		// Don't expose full response body as it might contain sensitive info
+		return nil, fmt.Errorf("HTTP %d: failed to create issue", resp.StatusCode)
 	}
 
 	var issue Issue

@@ -164,8 +164,8 @@ func saveToConfigFile(url, email, username, token string) error {
 		}
 	}
 
-	// Create new config content
-	file, err := os.Create(configPath)
+	// Create new config content with secure permissions
+	file, err := os.OpenFile(configPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %w", err)
 	}
@@ -187,7 +187,8 @@ func saveToConfigFile(url, email, username, token string) error {
 	}
 	fmt.Fprintf(file, "token=%s\n", token)
 
-	fmt.Printf("Configuration saved to %s\n", configPath)
+	fmt.Printf("Configuration saved to %s with secure permissions (0600)\n", configPath)
+	fmt.Println("Note: Your API token is stored in plaintext. Keep this file secure.")
 	return nil
 }
 
