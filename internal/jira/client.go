@@ -140,6 +140,18 @@ type AddCommentRequest struct {
 	Body string `json:"body"`
 }
 
+type SearchRequest struct {
+	JQL        string   `json:"jql"`
+	MaxResults int      `json:"maxResults"`
+	Fields     []string `json:"fields"`
+}
+
+type SearchResponse struct {
+	Issues     []Issue `json:"issues"`
+	Total      int     `json:"total"`
+	MaxResults int     `json:"maxResults"`
+}
+
 func NewClient(baseURL, email, username, token string) *Client {
 	// Configure secure TLS settings
 	tlsConfig := &tls.Config{
@@ -336,4 +348,51 @@ func (c *Client) CreateIssue(projectKey, summary, description, issueType, epicKe
 	}
 
 	return &issue, nil
+}
+
+func (c *Client) SearchIssues(jql string, maxResults int) (*SearchResponse, error) {
+	endpoint := "/rest/api/2/search"
+	
+	reqBody := SearchRequest{
+		JQL:        jql,
+		MaxResults: maxResults,
+		Fields: []string{
+			"summary", "description", "status", "assignee", "reporter", 
+			"priority", "labels", "components", "fixVersions", "created", 
+			"updated", "issuetype", "project", "parent", "customfield_10014",
+		},
+	}
+	
+	resp, err := c.makeRequest("POST", endpoint, reqBody)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		return nil, fmt.Errorf("authentication failed - check your credentials")
+	}
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("access denied - you may not have permission to search issues")
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: search failed", resp.StatusCode)
+	}
+
+	var searchResp SearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &searchResp, nil
+}
+
+func (c *Client) GetEpicChildren(epicKey string) ([]Issue, error) {
+	jql := fmt.Sprintf("parent = %s ORDER BY key ASC", epicKey)
+	searchResp, err := c.SearchIssues(jql, 100)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search for child issues: %w", err)
+	}
+	
+	return searchResp.Issues, nil
 }

@@ -6,8 +6,9 @@ A blazing fast command-line interface for JIRA operations. Written in Go, compil
 
 - **View tickets**: Fetch and display JIRA ticket information
 - **Add comments**: Add comments to existing tickets
-- **Update tickets**: Update ticket descriptions and other fields
+- **Update tickets**: Update ticket descriptions and epic/parent linking
 - **Create tickets**: Create new tickets with epic linking support
+- **Epic management**: List child tickets of an epic
 - **Multiple output formats**: Human-readable or JSON output
 - **File input**: Read descriptions and comments from files
 - **Zero dependencies**: Single binary, no runtime dependencies
@@ -99,6 +100,12 @@ jet update PROJ-123 --description-file description.txt
 
 # Update from stdin
 echo "New description" | jet update PROJ-123 --description-file -
+
+# Link ticket to an epic
+jet update PROJ-123 --epic PROJ-100
+
+# Change parent ticket
+jet update PROJ-123 --parent PROJ-200
 ```
 
 ### Create a ticket
@@ -118,6 +125,19 @@ jet create --project PROJ --summary "Bug report" --type Bug
 
 # Description from file
 jet create --project PROJ --summary "Feature" --description-file spec.md
+```
+
+### List epic children
+
+```bash
+# List child tickets of an epic
+jet epic PROJ-100
+
+# JSON format
+jet epic PROJ-100 --format json
+
+# Save to file
+jet epic PROJ-100 --output children.txt
 ```
 
 ## Commands
@@ -144,6 +164,8 @@ Update ticket fields.
 **Flags:**
 - `--description`: New description text
 - `--description-file`: Read description from file (use `-` for stdin)
+- `--epic`: Epic key to link this ticket to
+- `--parent`: Parent ticket key to link this ticket to
 
 ### `jet create`
 
@@ -156,6 +178,14 @@ Create a new ticket.
 - `--description-file`: Read description from file (use `-` for stdin)
 - `--type, -t`: Issue type (default: Task)
 - `--epic, -e`: Epic key to link this ticket to
+
+### `jet epic EPIC-KEY`
+
+List child tickets of an epic.
+
+**Flags:**
+- `--format`: Output format (`readable` or `json`)
+- `--output, -o`: Output file (default: stdout)
 
 ## Examples
 
@@ -176,6 +206,12 @@ jet create --project ABC --summary "Login fails on Safari" --type Bug --descript
 
 # Update ticket description from stdin
 cat new-description.txt | jet update ABC-123 --description-file -
+
+# List epic children and save as JSON
+jet epic ABC-100 --format json --output epic-children.json
+
+# Link a ticket to a different epic
+jet update ABC-456 --epic ABC-200
 ```
 
 ## Security
