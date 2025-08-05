@@ -142,12 +142,14 @@ type AddCommentRequest struct {
 
 type SearchRequest struct {
 	JQL        string   `json:"jql"`
+	StartAt    int      `json:"startAt"`
 	MaxResults int      `json:"maxResults"`
 	Fields     []string `json:"fields"`
 }
 
 type SearchResponse struct {
 	Issues     []Issue `json:"issues"`
+	StartAt    int     `json:"startAt"`
 	Total      int     `json:"total"`
 	MaxResults int     `json:"maxResults"`
 }
@@ -351,10 +353,15 @@ func (c *Client) CreateIssue(projectKey, summary, description, issueType, epicKe
 }
 
 func (c *Client) SearchIssues(jql string, maxResults int) (*SearchResponse, error) {
+	return c.SearchIssuesWithPagination(jql, 0, maxResults)
+}
+
+func (c *Client) SearchIssuesWithPagination(jql string, startAt int, maxResults int) (*SearchResponse, error) {
 	endpoint := "/rest/api/2/search"
 	
 	reqBody := SearchRequest{
 		JQL:        jql,
+		StartAt:    startAt,
 		MaxResults: maxResults,
 		Fields: []string{
 			"summary", "description", "status", "assignee", "reporter", 
@@ -389,10 +396,26 @@ func (c *Client) SearchIssues(jql string, maxResults int) (*SearchResponse, erro
 
 func (c *Client) GetEpicChildren(epicKey string) ([]Issue, error) {
 	jql := fmt.Sprintf("parent = %s ORDER BY key ASC", epicKey)
-	searchResp, err := c.SearchIssues(jql, 100)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search for child issues: %w", err)
+	
+	var allIssues []Issue
+	startAt := 0
+	maxResults := 100
+	
+	for {
+		searchResp, err := c.SearchIssuesWithPagination(jql, startAt, maxResults)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search for child issues: %w", err)
+		}
+		
+		allIssues = append(allIssues, searchResp.Issues...)
+		
+		// Check if we've fetched all issues
+		if startAt + len(searchResp.Issues) >= searchResp.Total {
+			break
+		}
+		
+		startAt += maxResults
 	}
 	
-	return searchResp.Issues, nil
+	return allIssues, nil
 }

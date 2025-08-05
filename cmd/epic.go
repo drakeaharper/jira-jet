@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"jet/internal/config"
 	"jet/internal/jira"
@@ -15,15 +16,18 @@ import (
 var (
 	epicFormat string
 	epicOutput string
+	showAllTickets bool
 )
 
 var epicCmd = &cobra.Command{
 	Use:   "epic EPIC-KEY",
-	Short: "List child tickets of an epic",
-	Long: `List all child tickets (subtasks) of the specified epic.
+	Short: "List child tickets of an epic (excludes closed by default)",
+	Long: `List child tickets (subtasks) of the specified epic.
+By default, closed tickets are excluded. Use --all to show all tickets.
 
 Examples:
-  jet epic PROJ-123
+  jet epic PROJ-123                        # Show only non-closed tickets
+  jet epic PROJ-123 --all                  # Show all tickets including closed
   jet epic PROJ-123 --format json
   jet epic PROJ-123 --output children.txt`,
 	Args: cobra.ExactArgs(1),
@@ -52,8 +56,24 @@ Examples:
 			os.Exit(1)
 		}
 
+		// Filter out closed tickets unless --all flag is used
+		if !showAllTickets {
+			var filteredChildren []jira.Issue
+			for _, child := range children {
+				status := strings.ToLower(child.Fields.Status.Name)
+				if status != "closed" && status != "done" && status != "resolved" {
+					filteredChildren = append(filteredChildren, child)
+				}
+			}
+			children = filteredChildren
+		}
+
 		if len(children) == 0 {
-			fmt.Printf("No child tickets found for epic %s\n", epicKey)
+			if showAllTickets {
+				fmt.Printf("No child tickets found for epic %s\n", epicKey)
+			} else {
+				fmt.Printf("No open child tickets found for epic %s (use --all to show closed tickets)\n", epicKey)
+			}
 			return
 		}
 
@@ -85,23 +105,83 @@ Examples:
 func formatEpicChildren(epicKey string, children []jira.Issue) string {
 	var sb strings.Builder
 	
-	sb.WriteString(fmt.Sprintf("Epic: %s\n", epicKey))
-	sb.WriteString(fmt.Sprintf("Found %d child ticket(s):\n\n", len(children)))
+	// Color definitions
+	cyan := color.New(color.FgCyan, color.Bold)
+	yellow := color.New(color.FgYellow, color.Bold)
+	blue := color.New(color.FgBlue)
+	white := color.New(color.FgWhite)
+	gray := color.New(color.FgHiBlack)
+	
+	// Epic header
+	cyan.Fprintf(&sb, "Epic: %s\n", epicKey)
+	if showAllTickets {
+		fmt.Fprintf(&sb, "Found %d child ticket(s):\n\n", len(children))
+	} else {
+		fmt.Fprintf(&sb, "Found %d open child ticket(s):\n\n", len(children))
+	}
 
 	w := tabwriter.NewWriter(&sb, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "KEY\tSTATUS\tTYPE\tSUMMARY")
-	fmt.Fprintln(w, "---\t------\t----\t-------")
+	
+	// Table headers with color
+	yellow.Fprintln(w, "KEY\tSTATUS\tASSIGNEE\tTYPE\tSUMMARY")
+	gray.Fprintln(w, "---\t------\t--------\t----\t-------")
 
 	for _, child := range children {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			child.Key,
-			child.Fields.Status.Name,
-			child.Fields.IssueType.Name,
-			truncateString(child.Fields.Summary, 60))
+		assignee := "Unassigned"
+		if child.Fields.Assignee != nil {
+			assignee = child.Fields.Assignee.DisplayName
+			if assignee == "" {
+				assignee = child.Fields.Assignee.Name
+			}
+		}
+		
+		// Color the key
+		keyColor := blue
+		keyStr := keyColor.Sprint(child.Key)
+		
+		// Color the status based on its value
+		statusColor := getEpicStatusColor(child.Fields.Status.Name)
+		statusStr := statusColor.Sprint(child.Fields.Status.Name)
+		
+		// Color assignee (gray if unassigned)
+		assigneeStr := assignee
+		if assignee == "Unassigned" {
+			assigneeStr = gray.Sprint(assignee)
+		} else {
+			assigneeStr = white.Sprint(truncateString(assignee, 20))
+		}
+		
+		// Issue type in white
+		typeStr := white.Sprint(child.Fields.IssueType.Name)
+		
+		// Summary in default color
+		summaryStr := truncateString(child.Fields.Summary, 50)
+		
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			keyStr,
+			statusStr,
+			assigneeStr,
+			typeStr,
+			summaryStr)
 	}
 	
 	w.Flush()
 	return sb.String()
+}
+
+func getEpicStatusColor(status string) *color.Color {
+	switch strings.ToLower(status) {
+	case "done", "closed", "resolved":
+		return color.New(color.FgGreen)
+	case "in progress", "in review", "in development":
+		return color.New(color.FgYellow)
+	case "blocked":
+		return color.New(color.FgRed)
+	case "to do", "open", "new", "backlog":
+		return color.New(color.FgCyan)
+	default:
+		return color.New(color.FgWhite)
+	}
 }
 
 func truncateString(s string, maxLen int) string {
@@ -116,4 +196,5 @@ func init() {
 	
 	epicCmd.Flags().StringVar(&epicFormat, "format", "readable", "Output format (readable or json)")
 	epicCmd.Flags().StringVarP(&epicOutput, "output", "o", "", "Output file (default: stdout)")
+	epicCmd.Flags().BoolVar(&showAllTickets, "all", false, "Show all tickets including closed ones")
 }
