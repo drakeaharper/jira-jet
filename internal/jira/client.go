@@ -63,8 +63,9 @@ type Project struct {
 }
 
 type User struct {
-	Name        string `json:"name"`
-	DisplayName string `json:"displayName"`
+	AccountID    string `json:"accountId"`
+	Name         string `json:"name"`
+	DisplayName  string `json:"displayName"`
 	EmailAddress string `json:"emailAddress"`
 }
 

@@ -82,7 +82,13 @@ Currently supports editing the description field, epic/parent linking, and assig
 			if err != nil {
 				return fmt.Errorf("failed to get current user: %w", err)
 			}
-			fields["assignee"] = map[string]string{"name": currentUser.Name}
+			// Use Account ID for GDPR compliance (newer JIRA versions)
+			if currentUser.AccountID != "" {
+				fields["assignee"] = map[string]string{"id": currentUser.AccountID}
+			} else {
+				// Fallback to name for older JIRA instances
+				fields["assignee"] = map[string]string{"name": currentUser.Name}
+			}
 		}
 
 		// Update the ticket
