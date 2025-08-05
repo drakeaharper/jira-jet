@@ -16,6 +16,7 @@ var (
 	updateDescFile    string
 	updateEpic        string
 	updateParent      string
+	assignToMe        bool
 )
 
 var editCmd = &cobra.Command{
@@ -23,14 +24,14 @@ var editCmd = &cobra.Command{
 	Short: "Edit a JIRA ticket",
 	Long: `Edit fields of a JIRA ticket.
 	
-Currently supports editing the description field and epic/parent linking.`,
+Currently supports editing the description field, epic/parent linking, and assignment.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ticketKey := args[0]
 
 		// Check if any update flags are provided
-		if updateDescription == "" && updateDescFile == "" && updateEpic == "" && updateParent == "" {
-			return fmt.Errorf("no update fields specified. Use --description, --description-file, --epic, or --parent")
+		if updateDescription == "" && updateDescFile == "" && updateEpic == "" && updateParent == "" && !assignToMe {
+			return fmt.Errorf("no update fields specified. Use --description, --description-file, --epic, --parent, or --assign-to-me")
 		}
 
 		// Load configuration
@@ -75,6 +76,15 @@ Currently supports editing the description field and epic/parent linking.`,
 			fields["parent"] = map[string]string{"key": updateParent}
 		}
 
+		// Handle self-assignment
+		if assignToMe {
+			currentUser, err := client.GetCurrentUser()
+			if err != nil {
+				return fmt.Errorf("failed to get current user: %w", err)
+			}
+			fields["assignee"] = map[string]string{"name": currentUser.Name}
+		}
+
 		// Update the ticket
 		if err := client.UpdateIssue(ticketKey, fields); err != nil {
 			return err
@@ -92,4 +102,5 @@ func init() {
 	editCmd.Flags().StringVar(&updateDescFile, "description-file", "", "Read new description from file (use '-' for stdin)")
 	editCmd.Flags().StringVar(&updateEpic, "epic", "", "Epic key to link this ticket to")
 	editCmd.Flags().StringVar(&updateParent, "parent", "", "Parent ticket key to link this ticket to")
+	editCmd.Flags().BoolVar(&assignToMe, "assign-to-me", false, "Assign the ticket to yourself")
 }

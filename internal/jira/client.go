@@ -419,3 +419,30 @@ func (c *Client) GetEpicChildren(epicKey string) ([]Issue, error) {
 	
 	return allIssues, nil
 }
+
+func (c *Client) GetCurrentUser() (*User, error) {
+	endpoint := "/rest/api/2/myself"
+	
+	resp, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		return nil, fmt.Errorf("authentication failed - check your credentials")
+	}
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("access denied - you may not have permission to view user information")
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: failed to get current user", resp.StatusCode)
+	}
+
+	var user User
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &user, nil
+}
