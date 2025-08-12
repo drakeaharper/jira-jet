@@ -32,7 +32,7 @@ Required fields:
 Optional fields:
   --description: Ticket description
   --description-file: Read description from file
-  --type: Issue type (default: Task)
+  --type: Issue type (default: Story)
   --epic: Epic key to link this ticket to`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate required fields
@@ -67,7 +67,7 @@ Optional fields:
 		// Set default issue type if not specified
 		issueType := createIssueType
 		if issueType == "" {
-			issueType = "Task"
+			issueType = "Story"
 		}
 
 		// Load configuration
@@ -102,7 +102,7 @@ func init() {
 	createCmd.Flags().StringVarP(&createSummary, "summary", "s", "", "Ticket summary/title (required)")
 	createCmd.Flags().StringVarP(&createDescription, "description", "d", "", "Ticket description")
 	createCmd.Flags().StringVar(&createDescFile, "description-file", "", "Read description from file (use '-' for stdin)")
-	createCmd.Flags().StringVarP(&createIssueType, "type", "t", "Task", "Issue type")
+	createCmd.Flags().StringVarP(&createIssueType, "type", "t", "Story", "Issue type")
 	createCmd.Flags().StringVarP(&createEpic, "epic", "e", "", "Epic key to link this ticket to")
 	
 	// Mark required flags
