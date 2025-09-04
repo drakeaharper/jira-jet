@@ -358,20 +358,16 @@ func (c *Client) SearchIssues(jql string, maxResults int) (*SearchResponse, erro
 }
 
 func (c *Client) SearchIssuesWithPagination(jql string, startAt int, maxResults int) (*SearchResponse, error) {
-	endpoint := "/rest/api/2/search"
+	// Use GET request with query parameters instead of POST
+	params := url.Values{}
+	params.Add("jql", jql)
+	params.Add("startAt", fmt.Sprintf("%d", startAt))
+	params.Add("maxResults", fmt.Sprintf("%d", maxResults))
+	params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,issuetype,project,parent,customfield_10014")
 	
-	reqBody := SearchRequest{
-		JQL:        jql,
-		StartAt:    startAt,
-		MaxResults: maxResults,
-		Fields: []string{
-			"summary", "description", "status", "assignee", "reporter", 
-			"priority", "labels", "components", "fixVersions", "created", 
-			"updated", "issuetype", "project", "parent", "customfield_10014",
-		},
-	}
+	endpoint := fmt.Sprintf("/rest/api/2/search?%s", params.Encode())
 	
-	resp, err := c.makeRequest("POST", endpoint, reqBody)
+	resp, err := c.makeRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -396,6 +392,38 @@ func (c *Client) SearchIssuesWithPagination(jql string, startAt int, maxResults 
 }
 
 func (c *Client) GetEpicChildren(epicKey string) ([]Issue, error) {
+	// Try the agile API approach first since /rest/api/2/search is giving HTTP 410
+	endpoint := fmt.Sprintf("/rest/agile/1.0/epic/%s/issue", epicKey)
+	
+	resp, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		return nil, fmt.Errorf("authentication failed - check your credentials")
+	}
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("access denied - you may not have permission to view epic issues")
+	}
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("epic %s not found", epicKey)
+	}
+	if resp.StatusCode != 200 {
+		// If agile API fails, fall back to the original search approach
+		return c.getEpicChildrenViaSearch(epicKey)
+	}
+
+	var searchResp SearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return searchResp.Issues, nil
+}
+
+func (c *Client) getEpicChildrenViaSearch(epicKey string) ([]Issue, error) {
 	jql := fmt.Sprintf("parent = %s ORDER BY key ASC", epicKey)
 	
 	var allIssues []Issue
@@ -420,6 +448,7 @@ func (c *Client) GetEpicChildren(epicKey string) ([]Issue, error) {
 	
 	return allIssues, nil
 }
+
 
 func (c *Client) GetCurrentUser() (*User, error) {
 	endpoint := "/rest/api/2/myself"
