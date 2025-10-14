@@ -392,60 +392,79 @@ func (c *Client) SearchIssuesWithPagination(jql string, startAt int, maxResults 
 }
 
 func (c *Client) GetEpicChildren(epicKey string) ([]Issue, error) {
-	// Try the agile API approach first since /rest/api/2/search is giving HTTP 410
-	endpoint := fmt.Sprintf("/rest/agile/1.0/epic/%s/issue", epicKey)
-	
-	resp, err := c.makeRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	// Use the Agile API with pagination to get all epic children
+	var allIssues []Issue
+	startAt := 0
+	maxResults := 50
 
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to view epic issues")
-	}
-	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("epic %s not found", epicKey)
-	}
-	if resp.StatusCode != 200 {
-		// If agile API fails, fall back to the original search approach
-		return c.getEpicChildrenViaSearch(epicKey)
+	for {
+		params := url.Values{}
+		params.Add("startAt", fmt.Sprintf("%d", startAt))
+		params.Add("maxResults", fmt.Sprintf("%d", maxResults))
+		params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,issuetype,project,parent,customfield_10014")
+
+		endpoint := fmt.Sprintf("/rest/agile/1.0/epic/%s/issue?%s", epicKey, params.Encode())
+
+		resp, err := c.makeRequest("GET", endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == 401 {
+			return nil, fmt.Errorf("authentication failed - check your credentials")
+		}
+		if resp.StatusCode == 403 {
+			return nil, fmt.Errorf("access denied - you may not have permission to view epic issues")
+		}
+		if resp.StatusCode == 404 {
+			return nil, fmt.Errorf("epic %s not found", epicKey)
+		}
+		if resp.StatusCode != 200 {
+			return nil, fmt.Errorf("HTTP %d: failed to get epic children", resp.StatusCode)
+		}
+
+		var searchResp SearchResponse
+		if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+
+		allIssues = append(allIssues, searchResp.Issues...)
+
+		// Check if we've fetched all issues
+		if startAt + len(searchResp.Issues) >= searchResp.Total {
+			break
+		}
+
+		startAt += maxResults
 	}
 
-	var searchResp SearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return searchResp.Issues, nil
+	return allIssues, nil
 }
 
 func (c *Client) getEpicChildrenViaSearch(epicKey string) ([]Issue, error) {
-	jql := fmt.Sprintf("parent = %s ORDER BY key ASC", epicKey)
-	
+	jql := fmt.Sprintf("\"Epic Link\" = %s ORDER BY key ASC", epicKey)
+
 	var allIssues []Issue
 	startAt := 0
 	maxResults := 100
-	
+
 	for {
 		searchResp, err := c.SearchIssuesWithPagination(jql, startAt, maxResults)
 		if err != nil {
 			return nil, fmt.Errorf("failed to search for child issues: %w", err)
 		}
-		
+
 		allIssues = append(allIssues, searchResp.Issues...)
-		
+
 		// Check if we've fetched all issues
 		if startAt + len(searchResp.Issues) >= searchResp.Total {
 			break
 		}
-		
+
 		startAt += maxResults
 	}
-	
+
 	return allIssues, nil
 }
 
