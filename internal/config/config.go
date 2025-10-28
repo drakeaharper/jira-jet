@@ -16,18 +16,40 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
+	return loadSection("jira", "JIRA")
+}
+
+func LoadConfluence() (*Config, error) {
+	// Try loading Confluence section first
+	config, err := loadSection("confluence", "CONFLUENCE")
+	if err == nil {
+		return config, nil
+	}
+
+	// If Confluence section doesn't exist, fall back to JIRA section
+	// This allows users to use the same credentials for both
+	config, jiraErr := loadSection("jira", "JIRA")
+	if jiraErr == nil {
+		return config, nil
+	}
+
+	// If both failed, return the original Confluence error
+	return nil, err
+}
+
+func loadSection(section, envPrefix string) (*Config, error) {
 	config := &Config{}
 
 	// Load from environment variables first
-	config.URL = os.Getenv("JIRA_URL")
-	config.Email = os.Getenv("JIRA_EMAIL")
-	config.Username = os.Getenv("JIRA_USERNAME")
-	config.Token = os.Getenv("JIRA_API_TOKEN")
+	config.URL = os.Getenv(envPrefix + "_URL")
+	config.Email = os.Getenv(envPrefix + "_EMAIL")
+	config.Username = os.Getenv(envPrefix + "_USERNAME")
+	config.Token = os.Getenv(envPrefix + "_API_TOKEN")
 
 	// Load from config file if env vars are missing
 	configFile := filepath.Join(os.Getenv("HOME"), ".jira_config")
 	if _, err := os.Stat(configFile); err == nil {
-		fileConfig, err := loadFromFile(configFile)
+		fileConfig, err := loadFromFileSection(configFile, section)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load config file: %w", err)
 		}
@@ -49,25 +71,25 @@ func Load() (*Config, error) {
 
 	// Validate required fields
 	if config.URL == "" {
-		return nil, fmt.Errorf("JIRA URL not configured. Set JIRA_URL environment variable or add 'url' to ~/.jira_config")
+		return nil, fmt.Errorf("%s URL not configured. Set %s_URL environment variable or add 'url' to ~/.jira_config [%s] section", envPrefix, envPrefix, section)
 	}
 	if config.Token == "" {
-		return nil, fmt.Errorf("JIRA API token not configured. Set JIRA_API_TOKEN environment variable or add 'token' to ~/.jira_config")
+		return nil, fmt.Errorf("%s API token not configured. Set %s_API_TOKEN environment variable or add 'token' to ~/.jira_config [%s] section", envPrefix, envPrefix, section)
 	}
 	if config.Email == "" && config.Username == "" {
-		return nil, fmt.Errorf("JIRA email or username not configured. Set JIRA_EMAIL/JIRA_USERNAME environment variable or add 'email'/'username' to ~/.jira_config")
+		return nil, fmt.Errorf("%s email or username not configured. Set %s_EMAIL/%s_USERNAME environment variable or add 'email'/'username' to ~/.jira_config [%s] section", envPrefix, envPrefix, envPrefix, section)
 	}
 
 	return config, nil
 }
 
-func loadFromFile(filename string) (*Config, error) {
+func loadFromFileSection(filename, section string) (*Config, error) {
 	// Check file permissions
 	fileInfo, err := os.Stat(filename)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Warn if file permissions are too permissive
 	mode := fileInfo.Mode()
 	if mode.Perm()&0077 != 0 {
@@ -77,7 +99,7 @@ func loadFromFile(filename string) (*Config, error) {
 		}
 		fmt.Fprintf(os.Stderr, "Warning: Fixed insecure permissions on %s (now 0600)\n", filename)
 	}
-	
+
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -86,11 +108,11 @@ func loadFromFile(filename string) (*Config, error) {
 
 	config := &Config{}
 	scanner := bufio.NewScanner(file)
-	inJiraSection := false
+	inTargetSection := false
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -99,17 +121,17 @@ func loadFromFile(filename string) (*Config, error) {
 		// Check for section headers
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			sectionName := strings.Trim(line, "[]")
-			inJiraSection = strings.ToLower(sectionName) == "jira"
+			inTargetSection = strings.ToLower(sectionName) == strings.ToLower(section)
 			continue
 		}
 
-		// Parse key=value pairs only in [jira] section
-		if inJiraSection && strings.Contains(line, "=") {
+		// Parse key=value pairs only in target section
+		if inTargetSection && strings.Contains(line, "=") {
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
 				key := strings.TrimSpace(parts[0])
 				value := strings.TrimSpace(parts[1])
-				
+
 				// Remove quotes if present
 				if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
 				   (strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
