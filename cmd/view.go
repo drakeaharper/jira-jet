@@ -208,11 +208,11 @@ func formatIssueReadable(issue *jira.Issue) string {
 	}
 
 	// Description
-	if issue.Fields.Description != "" {
+	if issue.Fields.DescriptionText != "" {
 		output.WriteString("\n")
 		output.WriteString(yellow.Sprint("📖 Description:\n"))
 		output.WriteString(gray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
-		formattedDescription := formatHTMLContent(issue.Fields.Description)
+		formattedDescription := formatHTMLContent(issue.Fields.DescriptionText)
 		output.WriteString(formattedDescription + "\n")
 	}
 

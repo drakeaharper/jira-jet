@@ -26,23 +26,24 @@ type Issue struct {
 }
 
 type Fields struct {
-	Summary     string      `json:"summary"`
-	Description string      `json:"description"`
-	Status      Status      `json:"status"`
-	IssueType   IssueType   `json:"issuetype"`
-	Priority    Priority    `json:"priority"`
-	Project     Project     `json:"project"`
-	Assignee    *User       `json:"assignee"`
-	Reporter    *User       `json:"reporter"`
-	Labels      []string    `json:"labels"`
-	Components  []Component `json:"components"`
-	FixVersions []Version   `json:"fixVersions"`
-	Created     string      `json:"created"`
-	Updated     string      `json:"updated"`
-	Comment     CommentList `json:"comment"`
-	Attachment  []Attachment `json:"attachment"`
-	Parent      *IssueLink  `json:"parent"`
-	EpicLink    *EpicLink   `json:"customfield_10014"`
+	Summary            string          `json:"summary"`
+	Description        json.RawMessage `json:"description"`
+	DescriptionText    string          `json:"-"` // Parsed text version
+	Status             Status          `json:"status"`
+	IssueType          IssueType       `json:"issuetype"`
+	Priority           Priority        `json:"priority"`
+	Project            Project         `json:"project"`
+	Assignee           *User           `json:"assignee"`
+	Reporter           *User           `json:"reporter"`
+	Labels             []string        `json:"labels"`
+	Components         []Component     `json:"components"`
+	FixVersions        []Version       `json:"fixVersions"`
+	Created            string          `json:"created"`
+	Updated            string          `json:"updated"`
+	Comment            CommentList     `json:"comment"`
+	Attachment         []Attachment    `json:"attachment"`
+	Parent             *IssueLink      `json:"parent"`
+	EpicLink           *EpicLink       `json:"customfield_10014"`
 }
 
 type Status struct {
@@ -229,7 +230,7 @@ func (c *Client) GetIssue(issueKey string) (*Issue, error) {
 	params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,issuetype,project,comment,attachment,parent,customfield_10014")
 
 	endpoint := fmt.Sprintf("/rest/api/2/issue/%s?%s", issueKey, params.Encode())
-	
+
 	resp, err := c.makeRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -254,7 +255,58 @@ func (c *Client) GetIssue(issueKey string) (*Issue, error) {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
+	// Parse description
+	issue.Fields.DescriptionText = parseDescription(issue.Fields.Description)
+
 	return &issue, nil
+}
+
+// parseDescription converts the description field (which can be either a string or ADF object) to plain text
+func parseDescription(desc json.RawMessage) string {
+	if len(desc) == 0 {
+		return ""
+	}
+
+	// Try to unmarshal as string first (API v2)
+	var strDesc string
+	if err := json.Unmarshal(desc, &strDesc); err == nil {
+		return strDesc
+	}
+
+	// If that fails, it's probably an ADF object (API v3)
+	// For now, just return a simplified text extraction
+	// TODO: Implement full ADF parsing if needed
+	var adfDoc map[string]interface{}
+	if err := json.Unmarshal(desc, &adfDoc); err == nil {
+		return extractTextFromADF(adfDoc)
+	}
+
+	return ""
+}
+
+// extractTextFromADF recursively extracts text content from Atlassian Document Format
+func extractTextFromADF(node map[string]interface{}) string {
+	var text strings.Builder
+
+	// Extract text from this node
+	if nodeText, ok := node["text"].(string); ok {
+		text.WriteString(nodeText)
+	}
+
+	// Recursively process content array
+	if content, ok := node["content"].([]interface{}); ok {
+		for _, child := range content {
+			if childMap, ok := child.(map[string]interface{}); ok {
+				childText := extractTextFromADF(childMap)
+				if childText != "" {
+					text.WriteString(childText)
+					text.WriteString(" ")
+				}
+			}
+		}
+	}
+
+	return text.String()
 }
 
 func (c *Client) AddComment(issueKey, comment string) error {
@@ -358,15 +410,16 @@ func (c *Client) SearchIssues(jql string, maxResults int) (*SearchResponse, erro
 }
 
 func (c *Client) SearchIssuesWithPagination(jql string, startAt int, maxResults int) (*SearchResponse, error) {
-	// Use GET request with query parameters instead of POST
+	// Use GET request with query parameters for v3 API
+	// The v3 API uses /rest/api/3/search/jql with GET method
 	params := url.Values{}
 	params.Add("jql", jql)
 	params.Add("startAt", fmt.Sprintf("%d", startAt))
 	params.Add("maxResults", fmt.Sprintf("%d", maxResults))
 	params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,issuetype,project,parent,customfield_10014")
-	
-	endpoint := fmt.Sprintf("/rest/api/2/search?%s", params.Encode())
-	
+
+	endpoint := fmt.Sprintf("/rest/api/3/search/jql?%s", params.Encode())
+
 	resp, err := c.makeRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -380,12 +433,37 @@ func (c *Client) SearchIssuesWithPagination(jql string, startAt int, maxResults 
 		return nil, fmt.Errorf("access denied - you may not have permission to search issues")
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d: search failed", resp.StatusCode)
+		// Read response body for more context
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("HTTP %d: search failed - %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Read the response body to handle it properly
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// First unmarshal to a generic map to see what fields are present
+	var rawResp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &rawResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	var searchResp SearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+	if err := json.Unmarshal(bodyBytes, &searchResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// If total is 0 but we have issues, use the issue count
+	// This handles API v3 which may not return total in all cases
+	if searchResp.Total == 0 && len(searchResp.Issues) > 0 {
+		searchResp.Total = len(searchResp.Issues)
+	}
+
+	// Parse descriptions for all issues
+	for i := range searchResp.Issues {
+		searchResp.Issues[i].Fields.DescriptionText = parseDescription(searchResp.Issues[i].Fields.Description)
 	}
 
 	return &searchResp, nil
