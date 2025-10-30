@@ -156,6 +156,26 @@ type SearchResponse struct {
 	MaxResults int     `json:"maxResults"`
 }
 
+type Transition struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	To   struct {
+		Name string `json:"name"`
+	} `json:"to"`
+}
+
+type TransitionsResponse struct {
+	Transitions []Transition `json:"transitions"`
+}
+
+type TransitionRequest struct {
+	Transition TransitionRef `json:"transition"`
+}
+
+type TransitionRef struct {
+	ID string `json:"id"`
+}
+
 func NewClient(baseURL, email, username, token string) *Client {
 	// Configure secure TLS settings
 	tlsConfig := &tls.Config{
@@ -572,4 +592,69 @@ func (c *Client) GetCurrentUser() (*User, error) {
 	}
 
 	return &user, nil
+}
+
+// GetTransitions retrieves available transitions for an issue
+func (c *Client) GetTransitions(issueKey string) ([]Transition, error) {
+	endpoint := fmt.Sprintf("/rest/api/2/issue/%s/transitions", issueKey)
+
+	resp, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("issue %s not found", issueKey)
+	}
+	if resp.StatusCode == 401 {
+		return nil, fmt.Errorf("authentication failed - check your credentials")
+	}
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("access denied - you may not have permission to view transitions")
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: failed to get transitions", resp.StatusCode)
+	}
+
+	var transResp TransitionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&transResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return transResp.Transitions, nil
+}
+
+// TransitionIssue transitions an issue to a new status
+func (c *Client) TransitionIssue(issueKey, transitionID string) error {
+	endpoint := fmt.Sprintf("/rest/api/2/issue/%s/transitions", issueKey)
+
+	reqBody := TransitionRequest{
+		Transition: TransitionRef{ID: transitionID},
+	}
+
+	resp, err := c.makeRequest("POST", endpoint, reqBody)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return fmt.Errorf("issue %s not found", issueKey)
+	}
+	if resp.StatusCode == 401 {
+		return fmt.Errorf("authentication failed - check your credentials")
+	}
+	if resp.StatusCode == 403 {
+		return fmt.Errorf("access denied - you may not have permission to transition this issue")
+	}
+	if resp.StatusCode == 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("invalid transition - %s", string(bodyBytes))
+	}
+	if resp.StatusCode != 204 {
+		return fmt.Errorf("HTTP %d: failed to transition issue", resp.StatusCode)
+	}
+
+	return nil
 }
