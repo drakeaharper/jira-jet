@@ -77,8 +77,17 @@ type ContentInfo struct {
 }
 
 type SpaceInfo struct {
+	ID   string `json:"id,omitempty"`
 	Key  string `json:"key"`
 	Name string `json:"name"`
+}
+
+type Space struct {
+	ID          string     `json:"id"`
+	Key         string     `json:"key"`
+	Name        string     `json:"name"`
+	Type        string     `json:"type"`
+	Status      string     `json:"status"`
 }
 
 func NewClient(baseURL, email, username, token string) *Client {
@@ -225,4 +234,104 @@ func (c *Client) SearchByText(searchText string, limit int) (*SearchResponse, er
 func (c *Client) SearchBySpace(spaceKey string, limit int) (*SearchResponse, error) {
 	cql := fmt.Sprintf("type=page AND space=\"%s\"", spaceKey)
 	return c.SearchPages(cql, limit)
+}
+
+// GetSpace retrieves space information by space key
+func (c *Client) GetSpace(spaceKey string) (*Space, error) {
+	endpoint := fmt.Sprintf("/wiki/api/v2/spaces?keys=%s", spaceKey)
+
+	resp, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("space %s not found", spaceKey)
+	}
+	if resp.StatusCode == 401 {
+		return nil, fmt.Errorf("authentication failed - check your credentials")
+	}
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("access denied - you may not have permission to view this space")
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: request failed", resp.StatusCode)
+	}
+
+	var result struct {
+		Results []Space `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(result.Results) == 0 {
+		return nil, fmt.Errorf("space %s not found", spaceKey)
+	}
+
+	return &result.Results[0], nil
+}
+
+// CreatePageRequest represents the request to create a new page
+type CreatePageRequest struct {
+	SpaceID  string             `json:"spaceId"`
+	Status   string             `json:"status"`
+	Title    string             `json:"title"`
+	ParentID string             `json:"parentId,omitempty"`
+	Body     CreatePageBody     `json:"body"`
+}
+
+type CreatePageBody struct {
+	Representation string `json:"representation"`
+	Value          string `json:"value"`
+}
+
+// CreatePage creates a new Confluence page
+func (c *Client) CreatePage(spaceID, title, content string, parentID string) (*Page, error) {
+	// Build the create request
+	createReq := CreatePageRequest{
+		SpaceID: spaceID,
+		Status:  "current",
+		Title:   title,
+		Body: CreatePageBody{
+			Representation: "storage",
+			Value:          content,
+		},
+	}
+
+	if parentID != "" {
+		createReq.ParentID = parentID
+	}
+
+	endpoint := "/wiki/api/v2/pages"
+
+	resp, err := c.makeRequest("POST", endpoint, createReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read the response body for better error messages
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == 401 {
+		return nil, fmt.Errorf("authentication failed - check your credentials")
+	}
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("access denied - you may not have permission to create pages in this space")
+	}
+	if resp.StatusCode == 400 {
+		return nil, fmt.Errorf("invalid request: %s", string(bodyBytes))
+	}
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		return nil, fmt.Errorf("HTTP %d: failed to create page: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var page Page
+	if err := json.Unmarshal(bodyBytes, &page); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &page, nil
 }

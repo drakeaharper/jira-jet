@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -21,7 +22,8 @@ var confluenceCmd = &cobra.Command{
 
 Subcommands:
   view   - View a Confluence page
-  search - Search for Confluence pages`,
+  search - Search for Confluence pages
+  create - Create a new Confluence page`,
 }
 
 var conViewFormat string
@@ -322,6 +324,99 @@ func stripHTMLTags(html string) string {
 	return text
 }
 
+var conCreateSpace string
+var conCreateParent string
+var conCreateFile string
+
+var conCreateCmd = &cobra.Command{
+	Use:   "create TITLE",
+	Short: "Create a new Confluence page",
+	Long: `Create a new Confluence page with the specified title and content.
+
+You must specify the space ID or key where the page will be created using the --space flag.
+Content can be provided via --file flag or will be read from stdin.
+
+Examples:
+  jet con create "My New Page" --space ENG --file content.html
+  jet con create "My New Page" --space 123456 --file content.html
+  echo "<p>Hello world</p>" | jet con create "My Page" --space ENG
+  jet con create "Child Page" --space ENG --parent 789012
+
+Content should be in Confluence storage format (HTML-like format).`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		title := args[0]
+
+		if conCreateSpace == "" {
+			return fmt.Errorf("space ID or key is required (use --space flag)")
+		}
+
+		// Load configuration
+		cfg, err := config.LoadConfluence()
+		if err != nil {
+			return fmt.Errorf("configuration error: %w", err)
+		}
+
+		// Read content from file or stdin
+		var content string
+		if conCreateFile != "" {
+			data, err := os.ReadFile(conCreateFile)
+			if err != nil {
+				return fmt.Errorf("failed to read content file: %w", err)
+			}
+			content = string(data)
+		} else {
+			// Read from stdin
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("failed to read content from stdin: %w", err)
+			}
+			content = string(data)
+		}
+
+		if strings.TrimSpace(content) == "" {
+			return fmt.Errorf("content cannot be empty")
+		}
+
+		// Create Confluence client
+		client := confluence.NewClient(cfg.URL, cfg.Email, cfg.Username, cfg.Token)
+
+		// If space is a key (not numeric), convert to ID
+		spaceID := conCreateSpace
+		// Check if it's not all digits - if so, it's a space key
+		if !regexp.MustCompile(`^\d+$`).MatchString(conCreateSpace) {
+			fmt.Printf("Looking up space ID for key: %s\n", conCreateSpace)
+			space, err := client.GetSpace(conCreateSpace)
+			if err != nil {
+				return fmt.Errorf("failed to get space: %w", err)
+			}
+			spaceID = space.ID
+			fmt.Printf("Found space ID: %s\n", spaceID)
+		}
+
+		// Create the page
+		page, err := client.CreatePage(spaceID, title, content, conCreateParent)
+		if err != nil {
+			return err
+		}
+
+		// Display success message
+		boldGreen := color.New(color.FgGreen, color.Bold)
+		cyan := color.New(color.FgCyan)
+
+		fmt.Println(boldGreen.Sprint("✓ Page created successfully!"))
+		fmt.Printf("\nPage ID: %s\n", page.ID)
+		fmt.Printf("Title:   %s\n", page.Title)
+		fmt.Printf("Status:  %s\n", page.Status)
+
+		if page.Links != nil && page.Links.Base != "" && page.Links.WebUI != "" {
+			fmt.Printf("URL:     %s\n", cyan.Sprintf("%s%s", page.Links.Base, page.Links.WebUI))
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	// Add view subcommand to confluence command
 	conViewCmd.Flags().StringVarP(&conViewFormat, "format", "f", "readable", "Output format (readable, json)")
@@ -332,6 +427,13 @@ func init() {
 	conSearchCmd.Flags().IntVarP(&conSearchLimit, "limit", "l", 10, "Maximum number of results")
 	conSearchCmd.Flags().StringVarP(&conSearchSpace, "space", "s", "", "Limit search to specific space")
 	confluenceCmd.AddCommand(conSearchCmd)
+
+	// Add create subcommand to confluence command
+	conCreateCmd.Flags().StringVarP(&conCreateSpace, "space", "s", "", "Space ID or key where the page will be created (required)")
+	conCreateCmd.Flags().StringVarP(&conCreateParent, "parent", "p", "", "Parent page ID (optional)")
+	conCreateCmd.Flags().StringVarP(&conCreateFile, "file", "f", "", "Read content from file instead of stdin")
+	conCreateCmd.MarkFlagRequired("space")
+	confluenceCmd.AddCommand(conCreateCmd)
 
 	// Add confluence command to root
 	rootCmd.AddCommand(confluenceCmd)
