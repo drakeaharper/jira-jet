@@ -8,6 +8,7 @@ A blazing fast command-line interface for JIRA operations. Written in Go, compil
 - **Add comments**: Add comments to existing tickets
 - **Update tickets**: Update ticket descriptions and epic/parent linking
 - **Create tickets**: Create new tickets with epic linking support
+- **Link tickets**: Create relationships between tickets (blocks, relates-to, duplicates, etc.)
 - **Epic management**: List child tickets of an epic
 - **Multiple output formats**: Human-readable or JSON output
 - **File input**: Read descriptions and comments from files
@@ -140,6 +141,22 @@ jet epic PROJ-100 --format json
 jet epic PROJ-100 --output children.txt
 ```
 
+### Link tickets
+
+```bash
+# Create a "blocks" relationship
+jet link PROJ-123 blocks PROJ-456
+
+# Create a "relates to" relationship
+jet link PROJ-123 relates-to PROJ-789
+
+# Create a "duplicates" relationship
+jet link PROJ-123 duplicates PROJ-999
+
+# Use reverse relationships
+jet link PROJ-456 is-blocked-by PROJ-123
+```
+
 ## Commands
 
 ### `jet view TICKET-KEY|URL`
@@ -187,6 +204,17 @@ List child tickets of an epic.
 - `--format`: Output format (`readable` or `json`)
 - `--output, -o`: Output file (default: stdout)
 
+### `jet link TICKET-KEY RELATIONSHIP TICKET-KEY`
+
+Create a link between two tickets with a specified relationship.
+
+**Common Relationships:**
+- `blocks` / `is-blocked-by`: One ticket blocks another
+- `relates-to`: Tickets are related
+- `duplicates` / `is-duplicated-by`: One ticket duplicates another
+- `clones` / `is-cloned-by`: One ticket is a clone of another
+- `causes` / `is-caused-by`: One ticket causes another
+
 ## Examples
 
 ```bash
@@ -212,6 +240,9 @@ jet epic ABC-100 --format json --output epic-children.json
 
 # Link a ticket to a different epic
 jet update ABC-456 --epic ABC-200
+
+# Link two tickets with a relationship
+jet link ABC-123 blocks ABC-456
 ```
 
 ## Security

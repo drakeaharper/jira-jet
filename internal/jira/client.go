@@ -176,6 +176,17 @@ type TransitionRef struct {
 	ID string `json:"id"`
 }
 
+type IssueLinkRequest struct {
+	Type        IssueLinkType `json:"type"`
+	InwardIssue IssueRef      `json:"inwardIssue"`
+	OutwardIssue IssueRef     `json:"outwardIssue"`
+	Comment     *Comment      `json:"comment,omitempty"`
+}
+
+type IssueLinkType struct {
+	Name string `json:"name"`
+}
+
 func NewClient(baseURL, email, username, token string) *Client {
 	// Configure secure TLS settings
 	tlsConfig := &tls.Config{
@@ -654,6 +665,56 @@ func (c *Client) TransitionIssue(issueKey, transitionID string) error {
 	}
 	if resp.StatusCode != 204 {
 		return fmt.Errorf("HTTP %d: failed to transition issue", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// LinkIssues creates a link between two issues
+func (c *Client) LinkIssues(inwardIssue, outwardIssue, linkType string, isInward bool) error {
+	endpoint := "/rest/api/2/issueLink"
+
+	// If the relationship is inward (e.g., "is-blocked-by"), swap the issues
+	// because the API always expects the relationship from the outward perspective
+	if isInward {
+		inwardIssue, outwardIssue = outwardIssue, inwardIssue
+	}
+
+	reqBody := IssueLinkRequest{
+		Type: IssueLinkType{
+			Name: linkType,
+		},
+		InwardIssue: IssueRef{
+			Key: inwardIssue,
+		},
+		OutwardIssue: IssueRef{
+			Key: outwardIssue,
+		},
+	}
+
+	resp, err := c.makeRequest("POST", endpoint, reqBody)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		return fmt.Errorf("authentication failed - check your credentials")
+	}
+	if resp.StatusCode == 403 {
+		return fmt.Errorf("access denied - you may not have permission to link issues")
+	}
+	if resp.StatusCode == 404 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("issue not found - %s", string(bodyBytes))
+	}
+	if resp.StatusCode == 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("invalid link request - %s", string(bodyBytes))
+	}
+	if resp.StatusCode != 201 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: failed to create link - %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	return nil
