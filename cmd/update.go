@@ -12,6 +12,7 @@ import (
 )
 
 var (
+	updateSummary     string
 	updateDescription string
 	updateDescFile    string
 	updateEpic        string
@@ -23,15 +24,15 @@ var editCmd = &cobra.Command{
 	Use:   "edit TICKET-KEY",
 	Short: "Edit a JIRA ticket",
 	Long: `Edit fields of a JIRA ticket.
-	
-Currently supports editing the description field, epic/parent linking, and assignment.`,
+
+Currently supports editing the summary/title, description field, epic/parent linking, and assignment.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ticketKey := args[0]
 
 		// Check if any update flags are provided
-		if updateDescription == "" && updateDescFile == "" && updateEpic == "" && updateParent == "" && !assignToMe {
-			return fmt.Errorf("no update fields specified. Use --description, --description-file, --epic, --parent, or --assign-to-me")
+		if updateSummary == "" && updateDescription == "" && updateDescFile == "" && updateEpic == "" && updateParent == "" && !assignToMe {
+			return fmt.Errorf("no update fields specified. Use --summary, --description, --description-file, --epic, --parent, or --assign-to-me")
 		}
 
 		// Load configuration
@@ -45,6 +46,11 @@ Currently supports editing the description field, epic/parent linking, and assig
 
 		// Prepare fields to update
 		fields := make(map[string]interface{})
+
+		// Handle summary update
+		if updateSummary != "" {
+			fields["summary"] = updateSummary
+		}
 
 		// Handle description update
 		if updateDescFile != "" {
@@ -103,7 +109,8 @@ Currently supports editing the description field, epic/parent linking, and assig
 
 func init() {
 	rootCmd.AddCommand(editCmd)
-	
+
+	editCmd.Flags().StringVar(&updateSummary, "summary", "", "New summary/title for the ticket")
 	editCmd.Flags().StringVar(&updateDescription, "description", "", "New description for the ticket")
 	editCmd.Flags().StringVar(&updateDescFile, "description-file", "", "Read new description from file (use '-' for stdin)")
 	editCmd.Flags().StringVar(&updateEpic, "epic", "", "Epic key to link this ticket to")
