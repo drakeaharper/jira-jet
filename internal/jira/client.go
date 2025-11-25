@@ -44,6 +44,7 @@ type Fields struct {
 	Attachment         []Attachment    `json:"attachment"`
 	Parent             *IssueLink      `json:"parent"`
 	EpicLink           *EpicLink       `json:"customfield_10014"`
+	IssueLinks         []IssueLinkItem `json:"issuelinks"`
 }
 
 type Status struct {
@@ -108,6 +109,30 @@ type IssueLink struct {
 type EpicLink struct {
 	Key     string `json:"key"`
 	Summary string `json:"summary"`
+}
+
+type IssueLinkItem struct {
+	ID           string              `json:"id"`
+	Type         IssueLinkTypeDetail `json:"type"`
+	InwardIssue  *LinkedIssue        `json:"inwardIssue,omitempty"`
+	OutwardIssue *LinkedIssue        `json:"outwardIssue,omitempty"`
+}
+
+type IssueLinkTypeDetail struct {
+	Name    string `json:"name"`
+	Inward  string `json:"inward"`
+	Outward string `json:"outward"`
+}
+
+type LinkedIssue struct {
+	Key    string       `json:"key"`
+	Fields LinkedFields `json:"fields"`
+}
+
+type LinkedFields struct {
+	Summary   string    `json:"summary"`
+	Status    Status    `json:"status"`
+	IssueType IssueType `json:"issuetype"`
 }
 
 type CreateIssueRequest struct {
@@ -258,7 +283,7 @@ func (c *Client) makeRequest(method, endpoint string, body interface{}) (*http.R
 func (c *Client) GetIssue(issueKey string) (*Issue, error) {
 	params := url.Values{}
 	params.Add("expand", "changelog,renderedFields")
-	params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,issuetype,project,comment,attachment,parent,customfield_10014")
+	params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,issuetype,project,comment,attachment,parent,customfield_10014,issuelinks")
 
 	endpoint := fmt.Sprintf("/rest/api/2/issue/%s?%s", issueKey, params.Encode())
 

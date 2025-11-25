@@ -156,6 +156,36 @@ func formatIssueReadable(issue *jira.Issue) string {
 		}
 	}
 
+	// Linked Issues
+	if len(issue.Fields.IssueLinks) > 0 {
+		output.WriteString("\n")
+		output.WriteString(cyan.Sprintf("🔗 Linked Issues (%d):\n", len(issue.Fields.IssueLinks)))
+		output.WriteString(gray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
+
+		for _, link := range issue.Fields.IssueLinks {
+			var linkedIssue *jira.LinkedIssue
+			var relationshipText string
+
+			if link.OutwardIssue != nil {
+				linkedIssue = link.OutwardIssue
+				relationshipText = link.Type.Outward
+			} else if link.InwardIssue != nil {
+				linkedIssue = link.InwardIssue
+				relationshipText = link.Type.Inward
+			}
+
+			if linkedIssue != nil {
+				statusColor := getStatusColor(linkedIssue.Fields.Status.Name)
+				output.WriteString(fmt.Sprintf("  %s %s\n", magenta.Sprint(relationshipText+":"), cyan.Sprint(linkedIssue.Key)))
+				output.WriteString(fmt.Sprintf("    %s %s\n", gray.Sprint("Summary:"), linkedIssue.Fields.Summary))
+				output.WriteString(fmt.Sprintf("    %s %s | %s %s\n",
+					gray.Sprint("Status:"), statusColor.Sprint(linkedIssue.Fields.Status.Name),
+					gray.Sprint("Type:"), linkedIssue.Fields.IssueType.Name))
+			}
+		}
+		output.WriteString("\n")
+	}
+
 	// Assignee
 	if issue.Fields.Assignee != nil {
 		assigneeName := issue.Fields.Assignee.DisplayName
