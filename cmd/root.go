@@ -9,7 +9,7 @@ var rootCmd = &cobra.Command{
 	Short: "A command-line tool for interacting with JIRA",
 	Long: `Jet is a fast and simple CLI tool for JIRA operations.
 
-It allows you to list, view, grab, edit tickets, add comments, and more
+It allows you to list, view, grab, drop, edit tickets, add comments, and more
 directly from the command line.
 
 Configuration:
