@@ -287,6 +287,22 @@ type CreatePageBody struct {
 	Value          string `json:"value"`
 }
 
+// UpdatePageRequest represents the request to update an existing page
+type UpdatePageRequest struct {
+	ID       string        `json:"id"`
+	Status   string        `json:"status"`
+	Title    string        `json:"title"`
+	SpaceID  string        `json:"spaceId"`
+	ParentID string        `json:"parentId,omitempty"`
+	Body     CreatePageBody `json:"body"`
+	Version  UpdateVersion  `json:"version"`
+}
+
+type UpdateVersion struct {
+	Number  int    `json:"number"`
+	Message string `json:"message,omitempty"`
+}
+
 // CreatePage creates a new Confluence page
 func (c *Client) CreatePage(spaceID, title, content string, parentID string) (*Page, error) {
 	// Build the create request
@@ -334,4 +350,115 @@ func (c *Client) CreatePage(spaceID, title, content string, parentID string) (*P
 	}
 
 	return &page, nil
+}
+
+// UpdatePage updates an existing Confluence page
+func (c *Client) UpdatePage(pageID, title, content, spaceID string, version int, parentID, versionMessage string) (*Page, error) {
+	// Build the update request
+	updateReq := UpdatePageRequest{
+		ID:      pageID,
+		Status:  "current",
+		Title:   title,
+		SpaceID: spaceID,
+		Body: CreatePageBody{
+			Representation: "storage",
+			Value:          content,
+		},
+		Version: UpdateVersion{
+			Number:  version,
+			Message: versionMessage,
+		},
+	}
+
+	if parentID != "" {
+		updateReq.ParentID = parentID
+	}
+
+	endpoint := fmt.Sprintf("/wiki/api/v2/pages/%s", pageID)
+
+	resp, err := c.makeRequest("PUT", endpoint, updateReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read the response body for better error messages
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == 401 {
+		return nil, fmt.Errorf("authentication failed - check your credentials")
+	}
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("access denied - you may not have permission to update this page")
+	}
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("page %s not found", pageID)
+	}
+	if resp.StatusCode == 409 {
+		return nil, fmt.Errorf("version conflict - page was modified by another user. Please retry the command")
+	}
+	if resp.StatusCode == 400 {
+		return nil, fmt.Errorf("invalid request: %s", string(bodyBytes))
+	}
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		return nil, fmt.Errorf("HTTP %d: failed to update page: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var page Page
+	if err := json.Unmarshal(bodyBytes, &page); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &page, nil
+}
+
+// ChildPagesResponse represents the response from getting child pages
+type ChildPagesResponse struct {
+	Results []ChildPage `json:"results"`
+	Links   struct {
+		Next string `json:"next,omitempty"`
+	} `json:"_links"`
+}
+
+type ChildPage struct {
+	ID      string     `json:"id"`
+	Type    string     `json:"type"`
+	Status  string     `json:"status"`
+	Title   string     `json:"title"`
+	Version *Version   `json:"version,omitempty"`
+	Links   *PageLinks `json:"_links,omitempty"`
+}
+
+// GetChildPages retrieves direct children of a page
+func (c *Client) GetChildPages(pageID string, limit int) (*ChildPagesResponse, error) {
+	params := url.Values{}
+	params.Add("limit", fmt.Sprintf("%d", limit))
+
+	endpoint := fmt.Sprintf("/wiki/api/v2/pages/%s/children?%s", pageID, params.Encode())
+
+	resp, err := c.makeRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("page %s not found", pageID)
+	}
+	if resp.StatusCode == 401 {
+		return nil, fmt.Errorf("authentication failed - check your credentials")
+	}
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("access denied - you may not have permission to view this page")
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: failed to get page children", resp.StatusCode)
+	}
+
+	var childrenResp ChildPagesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&childrenResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &childrenResp, nil
 }

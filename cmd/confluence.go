@@ -21,9 +21,12 @@ var confluenceCmd = &cobra.Command{
 	Long: `Access Confluence pages and perform searches.
 
 Subcommands:
-  view   - View a Confluence page
-  search - Search for Confluence pages
-  create - Create a new Confluence page`,
+  view     - View a Confluence page
+  search   - Search for Confluence pages
+  create   - Create a new Confluence page
+  update   - Update a Confluence page
+  children - List child pages of a page
+  convert  - Convert Markdown to Confluence storage format`,
 }
 
 var conViewFormat string
@@ -417,6 +420,331 @@ Content should be in Confluence storage format (HTML-like format).`,
 	},
 }
 
+var conUpdateTitle string
+var conUpdateContentFile string
+var conUpdateParent string
+var conUpdateVersionMessage string
+
+var conUpdateCmd = &cobra.Command{
+	Use:   "update PAGE-ID",
+	Short: "Update a Confluence page",
+	Long: `Update title, content, or parent of a Confluence page.
+
+You can update one or more fields at once. Content can be provided via
+--content-file flag (use "-" for stdin).
+
+You can find the page ID in the URL when viewing a page in Confluence:
+  https://yourcompany.atlassian.net/wiki/spaces/SPACE/pages/123456789/Page+Title
+  The page ID is 123456789
+
+Examples:
+  jet con update 123456 --title "New Title"
+  jet con update 123456 --content-file content.html
+  echo "<p>New content</p>" | jet con update 123456 --content-file -
+  jet con update 123456 --parent 789012
+  jet con update 123456 --title "New Title" --parent 789012
+
+Note: Content should be in Confluence storage format (HTML-like).
+Use "jet con convert" to convert Markdown to storage format.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pageID := args[0]
+
+		// Extract page ID from URL if a URL was provided
+		if strings.Contains(pageID, "://") {
+			re := regexp.MustCompile(`/pages/(\d+)`)
+			matches := re.FindStringSubmatch(pageID)
+			if len(matches) > 1 {
+				pageID = matches[1]
+			} else {
+				return fmt.Errorf("could not extract page ID from URL. Expected format: .../pages/123456789/...")
+			}
+		}
+
+		// Validate: at least one update flag provided
+		if conUpdateTitle == "" && conUpdateContentFile == "" && conUpdateParent == "" {
+			return fmt.Errorf("no update fields specified. Use --title, --content-file, or --parent")
+		}
+
+		// Load configuration
+		cfg, err := config.LoadConfluence()
+		if err != nil {
+			return fmt.Errorf("configuration error: %w", err)
+		}
+
+		// Create Confluence client
+		client := confluence.NewClient(cfg.URL, cfg.Email, cfg.Username, cfg.Token)
+
+		// Get current page to retrieve version number and current values
+		currentPage, err := client.GetPage(pageID)
+		if err != nil {
+			return err
+		}
+
+		// Determine values to use (new or current)
+		title := currentPage.Title
+		if conUpdateTitle != "" {
+			title = conUpdateTitle
+		}
+
+		content := ""
+		if currentPage.Body != nil && currentPage.Body.Storage != nil {
+			content = currentPage.Body.Storage.Value
+		}
+		if conUpdateContentFile != "" {
+			var contentBytes []byte
+			if conUpdateContentFile == "-" {
+				// Read from stdin
+				contentBytes, err = io.ReadAll(os.Stdin)
+				if err != nil {
+					return fmt.Errorf("failed to read content from stdin: %w", err)
+				}
+			} else {
+				// Read from file
+				contentBytes, err = os.ReadFile(conUpdateContentFile)
+				if err != nil {
+					return fmt.Errorf("failed to read content file: %w", err)
+				}
+			}
+			content = string(contentBytes)
+		}
+
+		if strings.TrimSpace(content) == "" {
+			return fmt.Errorf("content cannot be empty")
+		}
+
+		parentID := ""
+		if conUpdateParent != "" {
+			parentID = conUpdateParent
+		}
+
+		version := 0
+		if currentPage.Version != nil {
+			version = currentPage.Version.Number
+		}
+
+		// Update the page
+		updatedPage, err := client.UpdatePage(pageID, title, content, currentPage.SpaceID, version, parentID, conUpdateVersionMessage)
+		if err != nil {
+			return err
+		}
+
+		// Display success message
+		boldGreen := color.New(color.FgGreen, color.Bold)
+		cyan := color.New(color.FgCyan)
+
+		fmt.Println(boldGreen.Sprint("✓ Page updated successfully!"))
+		fmt.Printf("\nPage ID: %s\n", updatedPage.ID)
+		fmt.Printf("Title:   %s\n", updatedPage.Title)
+
+		if updatedPage.Version != nil {
+			fmt.Printf("Version: %d\n", updatedPage.Version.Number)
+		}
+
+		if updatedPage.Links != nil && updatedPage.Links.Base != "" && updatedPage.Links.WebUI != "" {
+			fmt.Printf("URL:     %s\n", cyan.Sprintf("%s%s", updatedPage.Links.Base, updatedPage.Links.WebUI))
+		}
+
+		return nil
+	},
+}
+
+var conChildrenLimit int
+var conChildrenFormat string
+var conChildrenOutput string
+
+var conChildrenCmd = &cobra.Command{
+	Use:     "children PAGE-ID",
+	Aliases: []string{"child", "ch"},
+	Short:   "List child pages of a page",
+	Long: `List all direct child pages of a Confluence page.
+
+You can find the page ID in the URL when viewing a page in Confluence:
+  https://yourcompany.atlassian.net/wiki/spaces/SPACE/pages/123456789/Page+Title
+  The page ID is 123456789
+
+Examples:
+  jet con children 123456
+  jet con children 123456 --limit 50
+  jet con children 123456 --format json --output children.json`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pageID := args[0]
+
+		// Extract page ID from URL if a URL was provided
+		if strings.Contains(pageID, "://") {
+			re := regexp.MustCompile(`/pages/(\d+)`)
+			matches := re.FindStringSubmatch(pageID)
+			if len(matches) > 1 {
+				pageID = matches[1]
+			} else {
+				return fmt.Errorf("could not extract page ID from URL. Expected format: .../pages/123456789/...")
+			}
+		}
+
+		// Load configuration
+		cfg, err := config.LoadConfluence()
+		if err != nil {
+			return fmt.Errorf("configuration error: %w", err)
+		}
+
+		// Create Confluence client
+		client := confluence.NewClient(cfg.URL, cfg.Email, cfg.Username, cfg.Token)
+
+		// Get child pages
+		childrenResp, err := client.GetChildPages(pageID, conChildrenLimit)
+		if err != nil {
+			return err
+		}
+
+		// Format output
+		var output string
+		switch conChildrenFormat {
+		case "json":
+			jsonData, err := json.MarshalIndent(childrenResp, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to format JSON: %w", err)
+			}
+			output = string(jsonData)
+		default:
+			output = formatChildrenReadable(childrenResp)
+		}
+
+		// Write output
+		if conChildrenOutput != "" {
+			file, err := os.Create(conChildrenOutput)
+			if err != nil {
+				return fmt.Errorf("failed to create output file: %w", err)
+			}
+			defer file.Close()
+
+			if _, err := file.WriteString(output); err != nil {
+				return fmt.Errorf("failed to write to output file: %w", err)
+			}
+			fmt.Printf("Child pages saved to %s\n", conChildrenOutput)
+		} else {
+			fmt.Print(output)
+		}
+
+		return nil
+	},
+}
+
+func formatChildrenReadable(resp *confluence.ChildPagesResponse) string {
+	var sb strings.Builder
+
+	boldBlue := color.New(color.FgBlue, color.Bold)
+	boldGreen := color.New(color.FgGreen, color.Bold)
+	cyan := color.New(color.FgCyan)
+
+	sb.WriteString(boldBlue.Sprintf("Found %d child page(s)\n\n", len(resp.Results)))
+
+	if len(resp.Results) == 0 {
+		sb.WriteString("No child pages found.\n")
+		return sb.String()
+	}
+
+	for i, child := range resp.Results {
+		sb.WriteString(boldBlue.Sprintf("%d. ", i+1))
+		sb.WriteString(boldGreen.Sprintf("%s\n", child.Title))
+
+		// Page ID and Status
+		sb.WriteString(cyan.Sprintf("   ID: %s", child.ID))
+		sb.WriteString(fmt.Sprintf(" | Status: %s", child.Status))
+
+		// Version
+		if child.Version != nil {
+			sb.WriteString(fmt.Sprintf(" | Version: %d", child.Version.Number))
+		}
+		sb.WriteString("\n")
+
+		// Path
+		if child.Links != nil && child.Links.WebUI != "" {
+			sb.WriteString(fmt.Sprintf("   Path: %s\n", child.Links.WebUI))
+		}
+
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+var conConvertOutput string
+
+var conConvertCmd = &cobra.Command{
+	Use:   "convert [FILE]",
+	Short: "Convert Markdown to Confluence storage format",
+	Long: `Convert Markdown to Confluence storage format (HTML-like).
+
+Reads Markdown from a file or stdin and outputs Confluence storage format.
+The output can be piped to create or update commands.
+
+Supported Markdown elements:
+  - Headers (# through ######)
+  - Bold (**text** or __text__)
+  - Italic (*text* or _text_)
+  - Code blocks (triple backticks or indented)
+  - Inline code (backtick code backtick)
+  - Links ([text](url))
+  - Unordered lists (-, *, +)
+  - Ordered lists (1., 2., etc)
+  - Tables (GitHub Flavored Markdown)
+  - Horizontal rules (---, ___, ***)
+  - Blockquotes (>)
+
+Examples:
+  jet con convert README.md
+  jet con convert README.md --output content.html
+  cat README.md | jet con convert
+  jet con convert README.md | jet con create "My Page" --space ENG --file -
+  jet con convert README.md | jet con update 123456 --content-file -`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var markdown []byte
+		var err error
+
+		// Read markdown from file or stdin
+		if len(args) == 0 {
+			// Read from stdin
+			markdown, err = io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("failed to read from stdin: %w", err)
+			}
+		} else {
+			// Read from file
+			markdown, err = os.ReadFile(args[0])
+			if err != nil {
+				return fmt.Errorf("failed to read file: %w", err)
+			}
+		}
+
+		if len(markdown) == 0 {
+			return fmt.Errorf("input is empty")
+		}
+
+		// Convert markdown to Confluence storage format
+		storageFormat := confluence.MarkdownToStorage(string(markdown))
+
+		// Write output
+		if conConvertOutput != "" {
+			file, err := os.Create(conConvertOutput)
+			if err != nil {
+				return fmt.Errorf("failed to create output file: %w", err)
+			}
+			defer file.Close()
+
+			if _, err := file.WriteString(storageFormat); err != nil {
+				return fmt.Errorf("failed to write to output file: %w", err)
+			}
+			fmt.Printf("Converted content saved to %s\n", conConvertOutput)
+		} else {
+			fmt.Print(storageFormat)
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	// Add view subcommand to confluence command
 	conViewCmd.Flags().StringVarP(&conViewFormat, "format", "f", "readable", "Output format (readable, json)")
@@ -434,6 +762,23 @@ func init() {
 	conCreateCmd.Flags().StringVarP(&conCreateFile, "file", "f", "", "Read content from file instead of stdin")
 	conCreateCmd.MarkFlagRequired("space")
 	confluenceCmd.AddCommand(conCreateCmd)
+
+	// Add update subcommand to confluence command
+	conUpdateCmd.Flags().StringVarP(&conUpdateTitle, "title", "t", "", "New page title")
+	conUpdateCmd.Flags().StringVarP(&conUpdateContentFile, "content-file", "f", "", "Read content from file or stdin (-)")
+	conUpdateCmd.Flags().StringVarP(&conUpdateParent, "parent", "p", "", "New parent page ID")
+	conUpdateCmd.Flags().StringVarP(&conUpdateVersionMessage, "version-message", "m", "", "Version comment")
+	confluenceCmd.AddCommand(conUpdateCmd)
+
+	// Add children subcommand to confluence command
+	conChildrenCmd.Flags().IntVarP(&conChildrenLimit, "limit", "l", 25, "Maximum number of children")
+	conChildrenCmd.Flags().StringVarP(&conChildrenFormat, "format", "f", "readable", "Output format (readable, json)")
+	conChildrenCmd.Flags().StringVarP(&conChildrenOutput, "output", "o", "", "Write output to file")
+	confluenceCmd.AddCommand(conChildrenCmd)
+
+	// Add convert subcommand to confluence command
+	conConvertCmd.Flags().StringVarP(&conConvertOutput, "output", "o", "", "Write output to file")
+	confluenceCmd.AddCommand(conConvertCmd)
 
 	// Add confluence command to root
 	rootCmd.AddCommand(confluenceCmd)
