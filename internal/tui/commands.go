@@ -94,6 +94,20 @@ type workflowSavedMsg struct {
 	path string
 }
 
+type formClaudeResponseMsg struct {
+	chatMessage string
+	fields      formClaudeFields
+	err         error
+}
+
+type formClaudeFields struct {
+	Project     string `json:"project"`
+	Summary     string `json:"summary"`
+	Description string `json:"description"`
+	IssueType   string `json:"issue_type"`
+	Epic        string `json:"epic"`
+}
+
 type clearErrMsg struct{}
 
 // fetchIssues searches for issues matching the given JQL.

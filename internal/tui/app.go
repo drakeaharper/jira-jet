@@ -262,6 +262,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Route to workflow editor
 		a.workflowEditor, _ = a.workflowEditor.Update(msg)
 		return a, nil
+
+	case formClaudeResponseMsg:
+		// Route to form
+		a.form, _ = a.form.Update(msg, a.client)
+		return a, nil
 	}
 
 	// Delegate to active view
@@ -374,7 +379,11 @@ func (a App) helpBar() string {
 			bar = helpBarStyle.Render(" j/k:scroll  e:edit  t:transition  c:comment  C:claude  g:grab  u:back  q:quit")
 		}
 	case viewForm:
-		bar = helpBarStyle.Render(" tab:next field  shift+tab:prev  ctrl+s:submit  esc:cancel")
+		if a.form.activePane == formPaneChat {
+			bar = helpBarStyle.Render(" enter:send  ctrl+p:switch to fields  ctrl+u/ctrl+d:scroll  esc:back")
+		} else {
+			bar = helpBarStyle.Render(" tab:next field  shift+tab:prev  ctrl+s:submit  ctrl+p:ask claude  esc:cancel")
+		}
 	case viewTransition:
 		bar = helpBarStyle.Render(" j/k:navigate  enter:select  u:back")
 	case viewWorkflowEditor:
