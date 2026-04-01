@@ -17,6 +17,7 @@ const (
 	viewForm
 	viewTransition
 	viewTaskViewer
+	viewWorkflowEditor
 )
 
 // App is the top-level Bubble Tea model.
@@ -32,7 +33,8 @@ type App struct {
 	detail     DetailModel
 	form       FormModel
 	transition TransitionModel
-	taskViewer TaskViewerModel
+	taskViewer     TaskViewerModel
+	workflowEditor WorkflowEditorModel
 
 	taskManager  *TaskManager
 	notification string
@@ -88,6 +90,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.transition = a.transition.SetSize(a.width, contentHeight)
 		case viewTaskViewer:
 			a.taskViewer = a.taskViewer.SetSize(a.width, contentHeight)
+		case viewWorkflowEditor:
+			a.workflowEditor = a.workflowEditor.SetSize(a.width, contentHeight)
 		}
 		return a, nil
 
@@ -200,7 +204,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, clearErrAfter(3*time.Second))
 			return a, tea.Batch(cmds...)
 		}
-		if err := a.taskManager.LaunchTask(msg.issue, msg.instruction); err != nil {
+		if err := a.taskManager.LaunchTask(msg.issue, msg.instruction, msg.workflowContent); err != nil {
 			a.errMsg = fmt.Sprintf("Failed to launch task: %s", err)
 			cmds = append(cmds, clearErrAfter(5*time.Second))
 			return a, tea.Batch(cmds...)
@@ -238,6 +242,26 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.activeView = viewTaskViewer
 		a.taskViewer = NewTaskViewerModel(a.taskManager, a.width, a.height-2)
 		return a, nil
+
+	case navigateToWorkflowEditorMsg:
+		a.viewStack = append(a.viewStack, a.activeView)
+		a.activeView = viewWorkflowEditor
+		a.workflowEditor = NewWorkflowEditorModel(a.width, a.height-2)
+		return a, a.workflowEditor.Init()
+
+	case workflowSavedMsg:
+		if len(a.viewStack) > 0 {
+			a.activeView = a.viewStack[len(a.viewStack)-1]
+			a.viewStack = a.viewStack[:len(a.viewStack)-1]
+		}
+		a.notification = fmt.Sprintf("Workflow saved to %s", msg.path)
+		cmds = append(cmds, clearNotificationAfter(5*time.Second))
+		return a, tea.Batch(cmds...)
+
+	case workflowEditorResponseMsg:
+		// Route to workflow editor
+		a.workflowEditor, _ = a.workflowEditor.Update(msg)
+		return a, nil
 	}
 
 	// Delegate to active view
@@ -258,6 +282,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewTaskViewer:
 		a.taskViewer, cmd = a.taskViewer.Update(msg)
 		cmds = append(cmds, cmd)
+	case viewWorkflowEditor:
+		a.workflowEditor, cmd = a.workflowEditor.Update(msg)
+		cmds = append(cmds, cmd)
 	}
 
 	return a, tea.Batch(cmds...)
@@ -274,6 +301,8 @@ func (a App) View() string {
 		content = a.form.View()
 	case viewTaskViewer:
 		content = a.taskViewer.View()
+	case viewWorkflowEditor:
+		content = a.workflowEditor.View()
 	case viewTransition:
 		// Render transition overlay on top of the previous view
 		var bg string
@@ -324,23 +353,38 @@ func (a App) helpBar() string {
 	var bar string
 	switch a.activeView {
 	case viewDashboard:
+		if a.dashboard.promptMode == promptWorkflowPicker {
+			return prefix + helpBarStyle.Render(" j/k:navigate  enter:select  esc:cancel")
+		}
 		if a.dashboard.promptMode == promptClaude {
 			return prefix + helpBarStyle.Render(" enter:new line  ctrl+s:submit  esc:cancel")
 		}
 		if a.dashboard.promptMode != promptNone {
 			return prefix + helpBarStyle.Render(" enter:confirm  esc:cancel")
 		}
-		base := " enter:view  o:open  x:epic  C:claude  T:tasks  c:create  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
+		base := " enter:view  o:open  x:epic  C:claude  T:tasks  W:workflow  c:create  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
 		if a.dashboard.viewingEpic != "" {
 			base = " enter:view  m:my tickets  a:show/hide closed  C:claude  T:tasks  o:open  x:epic  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
 		}
 		bar = helpBarStyle.Render(base)
 	case viewDetail:
-		bar = helpBarStyle.Render(" j/k:scroll  e:edit  t:transition  c:comment  C:claude  g:grab  u:back  q:quit")
+		if a.detail.pickingWorkflow {
+			bar = helpBarStyle.Render(" j/k:navigate  enter:select  esc:cancel")
+		} else {
+			bar = helpBarStyle.Render(" j/k:scroll  e:edit  t:transition  c:comment  C:claude  g:grab  u:back  q:quit")
+		}
 	case viewForm:
 		bar = helpBarStyle.Render(" tab:next field  shift+tab:prev  ctrl+s:submit  esc:cancel")
 	case viewTransition:
 		bar = helpBarStyle.Render(" j/k:navigate  enter:select  u:back")
+	case viewWorkflowEditor:
+		if a.workflowEditor.phase == phaseRepoPicker {
+			bar = helpBarStyle.Render(" j/k:navigate  enter:select  esc:back")
+		} else if a.workflowEditor.saveMode == savePrompting {
+			bar = helpBarStyle.Render(" enter:save  esc:cancel")
+		} else {
+			bar = helpBarStyle.Render(" enter:send  tab:switch pane  ctrl+s:save  ctrl+u/ctrl+d:scroll  esc:back")
+		}
 	case viewTaskViewer:
 		switch a.taskViewer.mode {
 		case taskViewList:

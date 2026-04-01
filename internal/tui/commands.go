@@ -64,8 +64,9 @@ type epicChildrenLoadedMsg struct {
 
 // Claude task messages
 type launchClaudeTaskMsg struct {
-	issue       *jira.Issue
-	instruction string
+	issue           *jira.Issue
+	instruction     string
+	workflowContent string
 }
 
 type claudeTaskDoneMsg struct {
@@ -81,6 +82,17 @@ type cancelClaudeTaskMsg struct {
 }
 
 type navigateToTaskViewerMsg struct{}
+type navigateToWorkflowEditorMsg struct{}
+
+type workflowEditorResponseMsg struct {
+	chatMessage     string
+	workflowContent string
+	err             error
+}
+
+type workflowSavedMsg struct {
+	path string
+}
 
 type clearErrMsg struct{}
 

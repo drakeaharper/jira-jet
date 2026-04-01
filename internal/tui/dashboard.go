@@ -94,6 +94,7 @@ const (
 	promptOpenTicket
 	promptEpic
 	promptClaude
+	promptWorkflowPicker
 )
 
 // DashboardModel is the model for the dashboard view.
@@ -116,6 +117,11 @@ type DashboardModel struct {
 	viewingEpic  string // non-empty when viewing an epic's children
 	epicShowAll  bool   // when true, show closed tickets in epic view
 	allEpicItems []jira.Issue // unfiltered epic children for toggle
+
+	// Workflow picker state
+	workflows        []Workflow
+	workflowCursor   int
+	selectedWorkflow string // content of chosen workflow, carried into launch msg
 }
 
 // NewDashboardModel creates a new dashboard model.
@@ -157,7 +163,10 @@ func (d DashboardModel) Init() tea.Cmd {
 
 func (d DashboardModel) SetSize(width, height int) DashboardModel {
 	h := height
-	if d.promptMode == promptClaude {
+	if d.promptMode == promptWorkflowPicker {
+		pickerHeight := len(d.workflows) + 3 // items + label + hint + padding
+		h -= pickerHeight
+	} else if d.promptMode == promptClaude {
 		h -= 6 // reserve space for textarea + label
 	} else if d.promptMode != promptNone {
 		h -= 2 // reserve space for single-line prompt
@@ -241,25 +250,60 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 	case tea.KeyMsg:
 		// Handle prompt input mode
 		if d.promptMode != promptNone {
+			// Workflow picker handling
+			if d.promptMode == promptWorkflowPicker {
+				switch msg.String() {
+				case "esc":
+					d.promptMode = promptNone
+					d.pendingClaudeIssue = nil
+					d.workflows = nil
+					return d, nil
+				case "j", "down":
+					if d.workflowCursor < len(d.workflows)-1 {
+						d.workflowCursor++
+					}
+					return d, nil
+				case "k", "up":
+					if d.workflowCursor > 0 {
+						d.workflowCursor--
+					}
+					return d, nil
+				case "enter":
+					d.selectedWorkflow = d.workflows[d.workflowCursor].Content
+					d.workflows = nil
+					d.promptMode = promptClaude
+					d.claudePrompt.SetWidth(d.list.Width() - 2)
+					if d.pendingClaudeIssue != nil {
+						d.claudePrompt.Placeholder = fmt.Sprintf("Additional instructions for %s (ctrl+s to submit, esc to cancel)", d.pendingClaudeIssue.Key)
+					}
+					d.claudePrompt.Reset()
+					return d, d.claudePrompt.Focus()
+				}
+				return d, nil
+			}
+
 			// Claude prompt uses textarea — separate handling
 			if d.promptMode == promptClaude {
 				switch msg.String() {
 				case "esc":
 					d.promptMode = promptNone
 					d.pendingClaudeIssue = nil
+					d.selectedWorkflow = ""
 					d.claudePrompt.Blur()
 					d.claudePrompt.Reset()
 					return d, nil
 				case "ctrl+s":
 					instruction := strings.TrimSpace(d.claudePrompt.Value())
+					workflowContent := d.selectedWorkflow
 					d.promptMode = promptNone
 					d.claudePrompt.Blur()
 					d.claudePrompt.Reset()
+					d.selectedWorkflow = ""
 					if d.pendingClaudeIssue != nil {
 						issue := d.pendingClaudeIssue
 						d.pendingClaudeIssue = nil
 						return d, func() tea.Msg {
-							return launchClaudeTaskMsg{issue: issue, instruction: instruction}
+							return launchClaudeTaskMsg{issue: issue, instruction: instruction, workflowContent: workflowContent}
 						}
 					}
 					return d, nil
@@ -345,6 +389,18 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 			if issue := d.selectedIssue(); issue != nil {
 				issueCopy := *issue
 				d.pendingClaudeIssue = &issueCopy
+				d.selectedWorkflow = ""
+
+				workflows, _ := DiscoverWorkflows()
+				if len(workflows) > 1 {
+					d.workflows = workflows
+					d.workflowCursor = 0
+					d.promptMode = promptWorkflowPicker
+					return d, nil
+				}
+				if len(workflows) == 1 {
+					d.selectedWorkflow = workflows[0].Content
+				}
 				d.promptMode = promptClaude
 				d.claudePrompt.SetWidth(d.list.Width() - 2)
 				d.claudePrompt.Placeholder = fmt.Sprintf("Additional instructions for %s (ctrl+s to submit, esc to cancel)", issue.Key)
@@ -354,6 +410,9 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 
 		case key.Matches(msg, dashboardKeys.Tasks):
 			return d, func() tea.Msg { return navigateToTaskViewerMsg{} }
+
+		case key.Matches(msg, dashboardKeys.Workflow):
+			return d, func() tea.Msg { return navigateToWorkflowEditorMsg{} }
 
 		case key.Matches(msg, dashboardKeys.Create):
 			return d, func() tea.Msg { return navigateToFormMsg{issue: nil} }
@@ -422,7 +481,27 @@ func (d DashboardModel) View() string {
 	view := d.list.View()
 
 	// Show prompt if active
-	if d.promptMode == promptClaude {
+	if d.promptMode == promptWorkflowPicker {
+		issueKey := ""
+		if d.pendingClaudeIssue != nil {
+			issueKey = d.pendingClaudeIssue.Key
+		}
+		label := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render(
+			fmt.Sprintf("Select workflow for %s:", issueKey),
+		)
+		var items strings.Builder
+		for i, w := range d.workflows {
+			cursor := "  "
+			style := dimStyle
+			if i == d.workflowCursor {
+				cursor = "> "
+				style = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+			}
+			items.WriteString(cursor + style.Render(w.Name) + "\n")
+		}
+		hint := dimStyle.Render("j/k: navigate  enter: select  esc: cancel")
+		view = lipgloss.JoinVertical(lipgloss.Left, view, label, items.String(), hint)
+	} else if d.promptMode == promptClaude {
 		issueKey := ""
 		if d.pendingClaudeIssue != nil {
 			issueKey = d.pendingClaudeIssue.Key

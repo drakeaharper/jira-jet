@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -18,6 +19,50 @@ import (
 )
 
 const stateFile = ".jet/tasks/state.json"
+const workflowDir = ".jet/workflows"
+
+// Workflow represents a discovered workflow file from .jet/workflows/.
+type Workflow struct {
+	Name    string // filename without .md extension
+	Path    string // full path to the .md file
+	Content string // raw file content
+}
+
+// DiscoverWorkflows finds all .md workflow files in .jet/workflows/.
+// Returns an empty slice (not error) if the directory does not exist.
+func DiscoverWorkflows() ([]Workflow, error) {
+	entries, err := os.ReadDir(workflowDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var workflows []Workflow
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		path := filepath.Join(workflowDir, e.Name())
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".md")
+		workflows = append(workflows, Workflow{
+			Name:    name,
+			Path:    path,
+			Content: string(content),
+		})
+	}
+
+	sort.Slice(workflows, func(i, j int) bool {
+		return workflows[i].Name < workflows[j].Name
+	})
+
+	return workflows, nil
+}
 
 // TaskStatus represents the lifecycle state of a background task.
 type TaskStatus int
@@ -357,7 +402,7 @@ func (tm *TaskManager) ClearFailedTasks() {
 // LaunchTask starts a background Claude task for the given issue.
 // Claude is responsible for finding the right repo, creating a worktree,
 // doing the work, committing, pushing, and creating a PR.
-func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string) error {
+func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, workflowContent string) error {
 	claudePath, err := findClaudeBinary()
 	if err != nil {
 		return err
@@ -395,7 +440,7 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string) e
 	program := tm.program
 	tm.mu.Unlock()
 
-	prompt := buildPrompt(issue, customInstruction, workDir)
+	prompt := buildPrompt(issue, customInstruction, workDir, workflowContent)
 	schema := `{"type":"object","properties":{"plan":{"type":"string","description":"A concise description of what you did"},"steps":{"type":"array","items":{"type":"string"},"description":"Steps you took"},"conclusion":{"type":"string","description":"Summary of what was done and any remaining items"},"files_changed":{"type":"array","items":{"type":"string"},"description":"File paths that were modified"},"pr_url":{"type":"string","description":"URL of the created pull request, empty if not created"},"repo":{"type":"string","description":"Path of the repo you worked in"},"worktree_path":{"type":"string","description":"Path of the worktree you created, empty if not applicable"}},"required":["plan","steps","conclusion","files_changed","pr_url","repo","worktree_path"]}`
 
 	go func() {
@@ -533,26 +578,32 @@ func findClaudeBinary() (string, error) {
 }
 
 // buildPrompt constructs the prompt from issue fields.
-func buildPrompt(issue *jira.Issue, customInstruction string, workDir string) string {
+// If workflowContent is non-empty, it replaces the hardcoded instructions section.
+func buildPrompt(issue *jira.Issue, customInstruction string, workDir string, workflowContent string) string {
 	branchName := strings.ToLower(issue.Key)
 	var b strings.Builder
 
-	b.WriteString("You are implementing a Jira ticket. Read the ticket context below, ")
-	b.WriteString("then make the necessary code changes.\n\n")
+	if workflowContent != "" {
+		b.WriteString(workflowContent)
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("You are implementing a Jira ticket. Read the ticket context below, ")
+		b.WriteString("then make the necessary code changes.\n\n")
 
-	b.WriteString("## Git Workflow\n\n")
-	b.WriteString(fmt.Sprintf("Your working directory is `%s`. ", workDir))
-	b.WriteString("This directory may contain multiple git repositories as subdirectories. ")
-	b.WriteString("First, explore the directory structure and read any relevant README or project files to understand which repo(s) are relevant to this ticket.\n\n")
-	b.WriteString("Once you identify the correct repo:\n")
-	b.WriteString(fmt.Sprintf("1. `cd` into the repo and create a git worktree: `git worktree add -b %s .jet/worktrees/%s`\n", branchName, branchName))
-	b.WriteString(fmt.Sprintf("2. `cd` into the worktree at `.jet/worktrees/%s` and do ALL your work there\n", branchName))
-	b.WriteString("3. Implement the changes described in the ticket\n")
-	b.WriteString(fmt.Sprintf("4. Stage and commit with a message referencing %s\n", issue.Key))
-	b.WriteString("5. Push the branch to the remote\n")
-	b.WriteString(fmt.Sprintf("6. Create a pull request using `gh pr create` with the title prefixed by %s\n\n", issue.Key))
-	b.WriteString("If the worktree branch already exists, you can use `git worktree add .jet/worktrees/" + branchName + " " + branchName + "` instead.\n")
-	b.WriteString("Report the repo path and worktree path in your structured output so it can be cleaned up.\n\n")
+		b.WriteString("## Git Workflow\n\n")
+		b.WriteString(fmt.Sprintf("Your working directory is `%s`. ", workDir))
+		b.WriteString("This directory may contain multiple git repositories as subdirectories. ")
+		b.WriteString("First, explore the directory structure and read any relevant README or project files to understand which repo(s) are relevant to this ticket.\n\n")
+		b.WriteString("Once you identify the correct repo:\n")
+		b.WriteString(fmt.Sprintf("1. `cd` into the repo and create a git worktree: `git worktree add -b %s .jet/worktrees/%s`\n", branchName, branchName))
+		b.WriteString(fmt.Sprintf("2. `cd` into the worktree at `.jet/worktrees/%s` and do ALL your work there\n", branchName))
+		b.WriteString("3. Implement the changes described in the ticket\n")
+		b.WriteString(fmt.Sprintf("4. Stage and commit with a message referencing %s\n", issue.Key))
+		b.WriteString("5. Push the branch to the remote\n")
+		b.WriteString(fmt.Sprintf("6. Create a pull request using `gh pr create` with the title prefixed by %s\n\n", issue.Key))
+		b.WriteString("If the worktree branch already exists, you can use `git worktree add .jet/worktrees/" + branchName + " " + branchName + "` instead.\n")
+		b.WriteString("Report the repo path and worktree path in your structured output so it can be cleaned up.\n\n")
+	}
 
 	b.WriteString(fmt.Sprintf("## Ticket: %s\n", issue.Key))
 	b.WriteString(fmt.Sprintf("**Summary:** %s\n", issue.Fields.Summary))

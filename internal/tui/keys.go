@@ -40,6 +40,7 @@ type dashboardKeyMap struct {
 	ToggleAll  key.Binding
 	Claude     key.Binding
 	Tasks      key.Binding
+	Workflow   key.Binding
 }
 
 var dashboardKeys = dashboardKeyMap{
@@ -98,6 +99,10 @@ var dashboardKeys = dashboardKeyMap{
 	Tasks: key.NewBinding(
 		key.WithKeys("T"),
 		key.WithHelp("T", "view tasks"),
+	),
+	Workflow: key.NewBinding(
+		key.WithKeys("W"),
+		key.WithHelp("W", "create workflow"),
 	),
 }
 

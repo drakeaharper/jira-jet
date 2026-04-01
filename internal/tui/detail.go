@@ -24,6 +24,11 @@ type DetailModel struct {
 	height      int
 	commenting  bool
 	commentArea textarea.Model
+
+	// Workflow picker state
+	pickingWorkflow bool
+	workflows       []Workflow
+	workflowCursor  int
 }
 
 func NewDetailModel() DetailModel {
@@ -74,6 +79,37 @@ func (d DetailModel) Update(msg tea.Msg, client *jira.Client) (DetailModel, tea.
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if d.pickingWorkflow {
+			switch msg.String() {
+			case "esc":
+				d.pickingWorkflow = false
+				d.workflows = nil
+				return d, nil
+			case "j", "down":
+				if d.workflowCursor < len(d.workflows)-1 {
+					d.workflowCursor++
+				}
+				return d, nil
+			case "k", "up":
+				if d.workflowCursor > 0 {
+					d.workflowCursor--
+				}
+				return d, nil
+			case "enter":
+				if d.issue != nil && d.workflowCursor < len(d.workflows) {
+					issueCopy := *d.issue
+					content := d.workflows[d.workflowCursor].Content
+					d.pickingWorkflow = false
+					d.workflows = nil
+					return d, func() tea.Msg {
+						return launchClaudeTaskMsg{issue: &issueCopy, instruction: "", workflowContent: content}
+					}
+				}
+				return d, nil
+			}
+			return d, nil
+		}
+
 		if d.commenting {
 			switch msg.String() {
 			case "esc":
@@ -136,9 +172,20 @@ func (d DetailModel) Update(msg tea.Msg, client *jira.Client) (DetailModel, tea.
 
 		case key.Matches(msg, detailKeys.Claude):
 			if d.issue != nil {
+				workflows, _ := DiscoverWorkflows()
+				if len(workflows) > 1 {
+					d.pickingWorkflow = true
+					d.workflows = workflows
+					d.workflowCursor = 0
+					return d, nil
+				}
 				issueCopy := *d.issue
+				var wfContent string
+				if len(workflows) == 1 {
+					wfContent = workflows[0].Content
+				}
 				return d, func() tea.Msg {
-					return launchClaudeTaskMsg{issue: &issueCopy, instruction: ""}
+					return launchClaudeTaskMsg{issue: &issueCopy, instruction: "", workflowContent: wfContent}
 				}
 			}
 
@@ -171,6 +218,29 @@ func (d DetailModel) View() string {
 			lipgloss.Center, lipgloss.Center,
 			d.spinner.View()+" Loading ticket...",
 		)
+	}
+
+	if d.pickingWorkflow {
+		var items strings.Builder
+		for i, w := range d.workflows {
+			cursor := "  "
+			style := dimStyle
+			if i == d.workflowCursor {
+				cursor = "> "
+				style = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+			}
+			items.WriteString(cursor + style.Render(w.Name) + "\n")
+		}
+		issueKey := ""
+		if d.issue != nil {
+			issueKey = d.issue.Key
+		}
+		title := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).
+			Render(fmt.Sprintf("Select workflow for %s", issueKey))
+		hint := dimStyle.Render("j/k: navigate  enter: select  esc: cancel")
+		content := lipgloss.JoinVertical(lipgloss.Left, title, "", items.String(), hint)
+		box := overlayStyle.Width(min(50, d.width-4)).Render(content)
+		return lipgloss.Place(d.width, d.height, lipgloss.Center, lipgloss.Center, box)
 	}
 
 	if d.commenting {
