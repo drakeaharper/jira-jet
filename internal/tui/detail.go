@@ -134,6 +134,14 @@ func (d DetailModel) Update(msg tea.Msg, client *jira.Client) (DetailModel, tea.
 				return d, grabIssueCmd(client, d.issue.Key)
 			}
 
+		case key.Matches(msg, detailKeys.Claude):
+			if d.issue != nil {
+				issueCopy := *d.issue
+				return d, func() tea.Msg {
+					return launchClaudeTaskMsg{issue: &issueCopy, instruction: ""}
+				}
+			}
+
 		case key.Matches(msg, detailKeys.Open):
 			// We don't have the base URL here, so skip browser open for now
 			return d, nil

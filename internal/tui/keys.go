@@ -38,6 +38,8 @@ type dashboardKeyMap struct {
 	Epic       key.Binding
 	BackToMine key.Binding
 	ToggleAll  key.Binding
+	Claude     key.Binding
+	Tasks      key.Binding
 }
 
 var dashboardKeys = dashboardKeyMap{
@@ -89,6 +91,14 @@ var dashboardKeys = dashboardKeyMap{
 		key.WithKeys("a"),
 		key.WithHelp("a", "show/hide closed"),
 	),
+	Claude: key.NewBinding(
+		key.WithKeys("C"),
+		key.WithHelp("C", "claude task"),
+	),
+	Tasks: key.NewBinding(
+		key.WithKeys("T"),
+		key.WithHelp("T", "view tasks"),
+	),
 }
 
 // Detail view key bindings.
@@ -98,6 +108,7 @@ type detailKeyMap struct {
 	Comment    key.Binding
 	Grab       key.Binding
 	Open       key.Binding
+	Claude     key.Binding
 }
 
 var detailKeys = detailKeyMap{
@@ -120,6 +131,10 @@ var detailKeys = detailKeyMap{
 	Open: key.NewBinding(
 		key.WithKeys("o"),
 		key.WithHelp("o", "open in browser"),
+	),
+	Claude: key.NewBinding(
+		key.WithKeys("C"),
+		key.WithHelp("C", "claude task"),
 	),
 }
 

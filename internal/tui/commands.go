@@ -62,6 +62,26 @@ type epicChildrenLoadedMsg struct {
 	epicKey string
 }
 
+// Claude task messages
+type launchClaudeTaskMsg struct {
+	issue       *jira.Issue
+	instruction string
+}
+
+type claudeTaskDoneMsg struct {
+	issueKey string
+	task     *Task
+	err      error
+}
+
+type clearNotificationMsg struct{}
+
+type cancelClaudeTaskMsg struct {
+	issueKey string
+}
+
+type navigateToTaskViewerMsg struct{}
+
 type clearErrMsg struct{}
 
 // fetchIssues searches for issues matching the given JQL.
@@ -211,5 +231,12 @@ func fetchEpicChildren(client *jira.Client, epicKey string) tea.Cmd {
 func clearErrAfter(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg {
 		return clearErrMsg{}
+	})
+}
+
+// clearNotificationAfter returns a command that clears the notification after a delay.
+func clearNotificationAfter(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
+		return clearNotificationMsg{}
 	})
 }

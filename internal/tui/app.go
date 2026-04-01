@@ -16,6 +16,7 @@ const (
 	viewDetail
 	viewForm
 	viewTransition
+	viewTaskViewer
 )
 
 // App is the top-level Bubble Tea model.
@@ -31,23 +32,31 @@ type App struct {
 	detail     DetailModel
 	form       FormModel
 	transition TransitionModel
+	taskViewer TaskViewerModel
+
+	taskManager  *TaskManager
+	notification string
 
 	err    error
 	errMsg string
 }
 
 // NewApp creates a new App model.
-func NewApp(client *jira.Client, initialJQL string) App {
+func NewApp(client *jira.Client, initialJQL string, tm *TaskManager) App {
 	return App{
-		client:     client,
-		activeView: viewDashboard,
-		dashboard:  NewDashboardModel(initialJQL),
+		client:      client,
+		activeView:  viewDashboard,
+		dashboard:   NewDashboardModel(initialJQL),
+		taskManager: tm,
 	}
 }
 
 // Run launches the Bubble Tea program.
 func Run(client *jira.Client, initialJQL string) error {
-	p := tea.NewProgram(NewApp(client, initialJQL), tea.WithAltScreen())
+	tm := NewTaskManager()
+	app := NewApp(client, initialJQL, tm)
+	p := tea.NewProgram(app, tea.WithAltScreen())
+	tm.SetProgram(p)
 	_, err := p.Run()
 	return err
 }
@@ -77,6 +86,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.form = a.form.SetSize(a.width, contentHeight)
 		case viewTransition:
 			a.transition = a.transition.SetSize(a.width, contentHeight)
+		case viewTaskViewer:
+			a.taskViewer = a.taskViewer.SetSize(a.width, contentHeight)
 		}
 		return a, nil
 
@@ -181,6 +192,52 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case grabDoneMsg:
 		return a, a.refreshDashboard()
+
+	// Claude task messages
+	case launchClaudeTaskMsg:
+		if a.taskManager.IsRunning(msg.issue.Key) {
+			a.errMsg = fmt.Sprintf("[%s] Task already running", msg.issue.Key)
+			cmds = append(cmds, clearErrAfter(3*time.Second))
+			return a, tea.Batch(cmds...)
+		}
+		if err := a.taskManager.LaunchTask(msg.issue, msg.instruction); err != nil {
+			a.errMsg = fmt.Sprintf("Failed to launch task: %s", err)
+			cmds = append(cmds, clearErrAfter(5*time.Second))
+			return a, tea.Batch(cmds...)
+		}
+		a.notification = fmt.Sprintf("[%s] Claude task launched", msg.issue.Key)
+		cmds = append(cmds, clearNotificationAfter(3*time.Second))
+		return a, tea.Batch(cmds...)
+
+	case claudeTaskDoneMsg:
+		if msg.err != nil {
+			a.errMsg = fmt.Sprintf("[%s] Claude task failed: %s", msg.issueKey, msg.err)
+			cmds = append(cmds, clearErrAfter(8*time.Second))
+		} else {
+			a.notification = fmt.Sprintf("[%s] Claude task completed ($%.4f)", msg.issueKey, msg.task.Cost)
+			cmds = append(cmds, clearNotificationAfter(10*time.Second))
+		}
+		return a, tea.Batch(cmds...)
+
+	case cancelClaudeTaskMsg:
+		if a.taskManager.KillTask(msg.issueKey) {
+			a.notification = fmt.Sprintf("[%s] Task cancelled", msg.issueKey)
+			cmds = append(cmds, clearNotificationAfter(5*time.Second))
+		} else {
+			a.errMsg = fmt.Sprintf("[%s] No running task to cancel", msg.issueKey)
+			cmds = append(cmds, clearErrAfter(3*time.Second))
+		}
+		return a, tea.Batch(cmds...)
+
+	case clearNotificationMsg:
+		a.notification = ""
+		return a, nil
+
+	case navigateToTaskViewerMsg:
+		a.viewStack = append(a.viewStack, a.activeView)
+		a.activeView = viewTaskViewer
+		a.taskViewer = NewTaskViewerModel(a.taskManager, a.width, a.height-2)
+		return a, nil
 	}
 
 	// Delegate to active view
@@ -198,6 +255,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewTransition:
 		a.transition, cmd = a.transition.Update(msg, a.client)
 		cmds = append(cmds, cmd)
+	case viewTaskViewer:
+		a.taskViewer, cmd = a.taskViewer.Update(msg)
+		cmds = append(cmds, cmd)
 	}
 
 	return a, tea.Batch(cmds...)
@@ -212,6 +272,8 @@ func (a App) View() string {
 		content = a.detail.View()
 	case viewForm:
 		content = a.form.View()
+	case viewTaskViewer:
+		content = a.taskViewer.View()
 	case viewTransition:
 		// Render transition overlay on top of the previous view
 		var bg string
@@ -235,6 +297,8 @@ func (a App) View() string {
 	var statusBar string
 	if a.errMsg != "" {
 		statusBar = errorStyle.Render(fmt.Sprintf(" Error: %s ", a.errMsg))
+	} else if a.notification != "" {
+		statusBar = successStyle.Render(fmt.Sprintf(" %s ", a.notification))
 	} else {
 		statusBar = a.helpBar()
 	}
@@ -251,22 +315,43 @@ func (a App) refreshDashboard() tea.Cmd {
 }
 
 func (a App) helpBar() string {
+	var prefix string
+	if count := a.taskManager.RunningCount(); count > 0 {
+		prefix = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).
+			Render(fmt.Sprintf(" [%d task(s) running] ", count))
+	}
+
+	var bar string
 	switch a.activeView {
 	case viewDashboard:
+		if a.dashboard.promptMode == promptClaude {
+			return prefix + helpBarStyle.Render(" enter:new line  ctrl+s:submit  esc:cancel")
+		}
 		if a.dashboard.promptMode != promptNone {
-			return helpBarStyle.Render(" enter:confirm  esc:cancel")
+			return prefix + helpBarStyle.Render(" enter:confirm  esc:cancel")
 		}
-		base := " enter:view  o:open  x:epic  c:create  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  /:filter  q:quit"
+		base := " enter:view  o:open  x:epic  C:claude  T:tasks  c:create  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
 		if a.dashboard.viewingEpic != "" {
-			base = " enter:view  m:my tickets  a:show/hide closed  o:open  x:epic  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
+			base = " enter:view  m:my tickets  a:show/hide closed  C:claude  T:tasks  o:open  x:epic  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
 		}
-		return helpBarStyle.Render(base)
+		bar = helpBarStyle.Render(base)
 	case viewDetail:
-		return helpBarStyle.Render(" j/k:scroll  e:edit  t:transition  c:comment  g:grab  u:back  q:quit")
+		bar = helpBarStyle.Render(" j/k:scroll  e:edit  t:transition  c:comment  C:claude  g:grab  u:back  q:quit")
 	case viewForm:
-		return helpBarStyle.Render(" tab:next field  shift+tab:prev  ctrl+s:submit  esc:cancel")
+		bar = helpBarStyle.Render(" tab:next field  shift+tab:prev  ctrl+s:submit  esc:cancel")
 	case viewTransition:
-		return helpBarStyle.Render(" j/k:navigate  enter:select  u:back")
+		bar = helpBarStyle.Render(" j/k:navigate  enter:select  u:back")
+	case viewTaskViewer:
+		switch a.taskViewer.mode {
+		case taskViewList:
+			bar = helpBarStyle.Render(" j/k:navigate  enter:view output  l:live logs  f:files  K:kill  x:clear error  X:clear all errors  r:refresh  u:back")
+		case taskViewFiles:
+			bar = helpBarStyle.Render(" j/k:navigate  enter:view  x:delete file  X:delete all  r:refresh  u:back")
+		case taskViewLogs:
+			bar = helpBarStyle.Render(" j/k:scroll  r:refresh logs  u:back")
+		default:
+			bar = helpBarStyle.Render(" j/k:scroll  u:back")
+		}
 	}
-	return ""
+	return prefix + bar
 }

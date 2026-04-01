@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -92,6 +93,7 @@ const (
 	promptNone promptMode = iota
 	promptOpenTicket
 	promptEpic
+	promptClaude
 )
 
 // DashboardModel is the model for the dashboard view.
@@ -103,9 +105,12 @@ type DashboardModel struct {
 	spinner    spinner.Model
 	total      int
 
-	// Prompt input for open/epic
-	prompt     textinput.Model
-	promptMode promptMode
+	// Prompt input for open/epic (single-line)
+	prompt textinput.Model
+	// Prompt for claude instructions (multi-line)
+	claudePrompt       textarea.Model
+	promptMode         promptMode
+	pendingClaudeIssue *jira.Issue // captured when C is pressed, used on ctrl+s
 
 	// Epic viewing state
 	viewingEpic  string // non-empty when viewing an epic's children
@@ -128,15 +133,21 @@ func NewDashboardModel(jql string) DashboardModel {
 	s.Style = lipgloss.NewStyle().Foreground(colorCyan)
 
 	ti := textinput.New()
-	ti.CharLimit = 64
+	ti.CharLimit = 128
+
+	ta := textarea.New()
+	ta.SetHeight(4)
+	ta.ShowLineNumbers = false
+	ta.CharLimit = 0 // no limit
 
 	return DashboardModel{
-		list:       l,
-		jql:        jql,
-		currentJQL: jql,
-		loading:    true,
-		spinner:    s,
-		prompt:     ti,
+		list:         l,
+		jql:          jql,
+		currentJQL:   jql,
+		loading:      true,
+		spinner:      s,
+		prompt:       ti,
+		claudePrompt: ta,
 	}
 }
 
@@ -146,10 +157,13 @@ func (d DashboardModel) Init() tea.Cmd {
 
 func (d DashboardModel) SetSize(width, height int) DashboardModel {
 	h := height
-	if d.promptMode != promptNone {
-		h -= 2 // reserve space for prompt line
+	if d.promptMode == promptClaude {
+		h -= 6 // reserve space for textarea + label
+	} else if d.promptMode != promptNone {
+		h -= 2 // reserve space for single-line prompt
 	}
 	d.list.SetSize(width, h)
+	d.claudePrompt.SetWidth(width - 2)
 	return d
 }
 
@@ -227,13 +241,43 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 	case tea.KeyMsg:
 		// Handle prompt input mode
 		if d.promptMode != promptNone {
+			// Claude prompt uses textarea — separate handling
+			if d.promptMode == promptClaude {
+				switch msg.String() {
+				case "esc":
+					d.promptMode = promptNone
+					d.pendingClaudeIssue = nil
+					d.claudePrompt.Blur()
+					d.claudePrompt.Reset()
+					return d, nil
+				case "ctrl+s":
+					instruction := strings.TrimSpace(d.claudePrompt.Value())
+					d.promptMode = promptNone
+					d.claudePrompt.Blur()
+					d.claudePrompt.Reset()
+					if d.pendingClaudeIssue != nil {
+						issue := d.pendingClaudeIssue
+						d.pendingClaudeIssue = nil
+						return d, func() tea.Msg {
+							return launchClaudeTaskMsg{issue: issue, instruction: instruction}
+						}
+					}
+					return d, nil
+				}
+				var cmd tea.Cmd
+				d.claudePrompt, cmd = d.claudePrompt.Update(msg)
+				return d, cmd
+			}
+
+			// Single-line prompts (open ticket, epic)
 			switch msg.String() {
 			case "esc":
 				d.promptMode = promptNone
 				d.prompt.Blur()
 				return d, nil
 			case "enter":
-				value := strings.TrimSpace(strings.ToUpper(d.prompt.Value()))
+				rawValue := strings.TrimSpace(d.prompt.Value())
+				value := strings.ToUpper(rawValue)
 				mode := d.promptMode
 				d.promptMode = promptNone
 				d.prompt.Blur()
@@ -296,6 +340,20 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 				d = d.applyEpicFilter()
 				return d, nil
 			}
+
+		case key.Matches(msg, dashboardKeys.Claude):
+			if issue := d.selectedIssue(); issue != nil {
+				issueCopy := *issue
+				d.pendingClaudeIssue = &issueCopy
+				d.promptMode = promptClaude
+				d.claudePrompt.SetWidth(d.list.Width() - 2)
+				d.claudePrompt.Placeholder = fmt.Sprintf("Additional instructions for %s (ctrl+s to submit, esc to cancel)", issue.Key)
+				d.claudePrompt.Reset()
+				return d, d.claudePrompt.Focus()
+			}
+
+		case key.Matches(msg, dashboardKeys.Tasks):
+			return d, func() tea.Msg { return navigateToTaskViewerMsg{} }
 
 		case key.Matches(msg, dashboardKeys.Create):
 			return d, func() tea.Msg { return navigateToFormMsg{issue: nil} }
@@ -364,7 +422,21 @@ func (d DashboardModel) View() string {
 	view := d.list.View()
 
 	// Show prompt if active
-	if d.promptMode != promptNone {
+	if d.promptMode == promptClaude {
+		issueKey := ""
+		if d.pendingClaudeIssue != nil {
+			issueKey = d.pendingClaudeIssue.Key
+		}
+		label := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render(
+			fmt.Sprintf("Claude task for %s:", issueKey),
+		)
+		taView := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(colorCyan).
+			Render(d.claudePrompt.View())
+		hint := dimStyle.Render("ctrl+s: submit  esc: cancel")
+		view = lipgloss.JoinVertical(lipgloss.Left, view, label, taView, hint)
+	} else if d.promptMode != promptNone {
 		var label string
 		switch d.promptMode {
 		case promptOpenTicket:
