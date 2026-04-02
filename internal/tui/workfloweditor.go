@@ -34,7 +34,8 @@ const (
 type editorPhase int
 
 const (
-	phaseRepoPicker editorPhase = iota
+	phaseWorkflowList editorPhase = iota
+	phaseRepoPicker
 	phaseChat
 )
 
@@ -90,6 +91,14 @@ type WorkflowEditorModel struct {
 	// Save state
 	saveMode      editorSaveMode
 	filenameInput textinput.Model
+
+	// Workflow list state
+	existingWorkflows []Workflow
+	listCursor        int
+
+	// Editing an existing workflow (non-empty = editing, pre-populates save name)
+	editingPath string
+	editingName string
 }
 
 // workflowEditorOutput is the structured output from Claude.
@@ -113,8 +122,6 @@ func NewWorkflowEditorModel(width, height int) WorkflowEditorModel {
 	filenameInput.Placeholder = "workflow-name"
 	filenameInput.CharLimit = 64
 
-	repos := discoverRepos()
-
 	m := WorkflowEditorModel{
 		width:         width,
 		height:        height,
@@ -122,10 +129,26 @@ func NewWorkflowEditorModel(width, height int) WorkflowEditorModel {
 		chatInput:     chatInput,
 		activePane:    paneChat,
 		filenameInput: filenameInput,
-		repos:         repos,
 	}
 
-	// If we're already in a git repo, or exactly one child repo, skip the picker
+	// Check for existing workflows first
+	existing, _ := DiscoverWorkflows()
+	if len(existing) > 0 {
+		m.existingWorkflows = existing
+		m.phase = phaseWorkflowList
+	} else {
+		m.initRepoPicker()
+	}
+
+	m = m.recalcLayout()
+	return m
+}
+
+// initRepoPicker sets up the repo picker or skips to chat if only one repo.
+func (m *WorkflowEditorModel) initRepoPicker() {
+	repos := discoverRepos()
+	m.repos = repos
+
 	if len(repos) == 1 {
 		m.phase = phaseChat
 		m.repoPath = repos[0].path
@@ -146,16 +169,38 @@ func NewWorkflowEditorModel(width, height int) WorkflowEditorModel {
 	} else {
 		m.phase = phaseRepoPicker
 	}
+}
 
-	m = m.recalcLayout()
-	return m
+// initEditWorkflow sets up the editor with an existing workflow pre-loaded.
+func (m *WorkflowEditorModel) initEditWorkflow(wf Workflow) {
+	m.editingPath = wf.Path
+	m.editingName = wf.Name
+	m.workflowContent = wf.Content
+
+	repos := discoverRepos()
+	m.repos = repos
+
+	if len(repos) == 1 {
+		m.repoPath = repos[0].path
+		m.repoName = repos[0].name
+	} else if len(repos) == 0 {
+		wd, _ := os.Getwd()
+		m.repoPath = wd
+		m.repoName = filepath.Base(wd)
+	}
+
+	m.phase = phaseChat
+	m.chatHistory = append(m.chatHistory, chatEntry{
+		role:    "system",
+		content: fmt.Sprintf("Editing workflow: %s\nThe current content is shown on the right. Chat with Claude to refine it, or ctrl+s to save.", wf.Name),
+	})
 }
 
 func (m WorkflowEditorModel) Init() tea.Cmd {
 	if m.phase == phaseChat {
 		return m.chatInput.Focus()
 	}
-	return nil
+	return nil // phaseWorkflowList and phaseRepoPicker need no init cmd
 }
 
 // discoverRepos checks if the current directory is a git repo, and if not,
@@ -231,6 +276,59 @@ func (m WorkflowEditorModel) Update(msg tea.Msg) (WorkflowEditorModel, tea.Cmd) 
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Workflow list phase
+		if m.phase == phaseWorkflowList {
+			switch msg.String() {
+			case "esc":
+				return m, func() tea.Msg { return goBackMsg{} }
+			case "j", "down":
+				// +1 for the "Create new" option
+				if m.listCursor < len(m.existingWorkflows) {
+					m.listCursor++
+				}
+				return m, nil
+			case "k", "up":
+				if m.listCursor > 0 {
+					m.listCursor--
+				}
+				return m, nil
+			case "enter":
+				if m.listCursor < len(m.existingWorkflows) {
+					// Edit existing workflow
+					m.initEditWorkflow(m.existingWorkflows[m.listCursor])
+					m = m.recalcLayout()
+					return m, m.chatInput.Focus()
+				}
+				// "Create new" selected
+				m.initRepoPicker()
+				m = m.recalcLayout()
+				if m.phase == phaseChat {
+					return m, m.chatInput.Focus()
+				}
+				return m, nil
+			case "d":
+				// Delete workflow
+				if m.listCursor < len(m.existingWorkflows) {
+					wf := m.existingWorkflows[m.listCursor]
+					os.Remove(wf.Path)
+					m.existingWorkflows = append(m.existingWorkflows[:m.listCursor], m.existingWorkflows[m.listCursor+1:]...)
+					if m.listCursor >= len(m.existingWorkflows)+1 && m.listCursor > 0 {
+						m.listCursor--
+					}
+					// If no workflows left, go to create flow
+					if len(m.existingWorkflows) == 0 {
+						m.initRepoPicker()
+						m = m.recalcLayout()
+						if m.phase == phaseChat {
+							return m, m.chatInput.Focus()
+						}
+					}
+				}
+				return m, nil
+			}
+			return m, nil
+		}
+
 		// Repo picker phase
 		if m.phase == phaseRepoPicker {
 			switch msg.String() {
@@ -302,7 +400,11 @@ func (m WorkflowEditorModel) Update(msg tea.Msg) (WorkflowEditorModel, tea.Cmd) 
 				return m, nil
 			}
 			m.saveMode = savePrompting
-			m.filenameInput.SetValue("")
+			if m.editingName != "" {
+				m.filenameInput.SetValue(m.editingName)
+			} else {
+				m.filenameInput.SetValue("")
+			}
 			m.filenameInput.Focus()
 			m.chatInput.Blur()
 			return m, m.filenameInput.Focus()
@@ -407,6 +509,9 @@ func (m WorkflowEditorModel) Update(msg tea.Msg) (WorkflowEditorModel, tea.Cmd) 
 }
 
 func (m WorkflowEditorModel) View() string {
+	if m.phase == phaseWorkflowList {
+		return m.workflowListView()
+	}
 	if m.phase == phaseRepoPicker {
 		return m.repoPickerView()
 	}
@@ -472,6 +577,35 @@ func (m WorkflowEditorModel) View() string {
 		sep,
 		lipgloss.NewStyle().Width(m.rightWidth).Render(rightPane),
 	)
+}
+
+func (m WorkflowEditorModel) workflowListView() string {
+	title := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).
+		Render("Workflows")
+	var items strings.Builder
+	for i, w := range m.existingWorkflows {
+		cursor := "  "
+		style := dimStyle
+		if i == m.listCursor {
+			cursor = "> "
+			style = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+		}
+		items.WriteString(cursor + style.Render(w.Name) + dimStyle.Render(".md") + "\n")
+	}
+	// "Create new" option at the end
+	createIdx := len(m.existingWorkflows)
+	cursor := "  "
+	style := dimStyle
+	if m.listCursor == createIdx {
+		cursor = "> "
+		style = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
+	}
+	items.WriteString("\n" + cursor + style.Render("+ Create new workflow") + "\n")
+
+	hint := dimStyle.Render("j/k: navigate  enter: edit/create  d: delete  esc: back")
+	content := lipgloss.JoinVertical(lipgloss.Left, title, "", items.String(), hint)
+	box := overlayStyle.Width(min(60, m.width-4)).Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func (m WorkflowEditorModel) repoPickerView() string {

@@ -387,7 +387,9 @@ func (a App) helpBar() string {
 	case viewTransition:
 		bar = helpBarStyle.Render(" j/k:navigate  enter:select  u:back")
 	case viewWorkflowEditor:
-		if a.workflowEditor.phase == phaseRepoPicker {
+		if a.workflowEditor.phase == phaseWorkflowList {
+			bar = helpBarStyle.Render(" j/k:navigate  enter:edit/create  d:delete  esc:back")
+		} else if a.workflowEditor.phase == phaseRepoPicker {
 			bar = helpBarStyle.Render(" j/k:navigate  enter:select  esc:back")
 		} else if a.workflowEditor.saveMode == savePrompting {
 			bar = helpBarStyle.Render(" enter:save  esc:cancel")
