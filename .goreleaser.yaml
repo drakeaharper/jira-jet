@@ -1,0 +1,44 @@
+version: 2
+
+project_name: jet
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: .
+    binary: jet
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+brews:
+  - repository:
+      owner: drakeaharper
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/drakeaharper/ira-jet"
+    description: "A CLI tool for Jira workflow management"
+    license: "MIT"
+    install: |
+      bin.install "jet"
+    test: |
+      system "#{bin}/jet", "--help"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
