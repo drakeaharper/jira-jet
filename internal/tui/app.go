@@ -145,6 +145,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case refreshDashboardMsg:
+		if a.dashboard.viewingProjectEpics != "" {
+			return a, fetchProjectEpics(a.client, a.dashboard.viewingProjectEpics)
+		}
 		if a.dashboard.viewingEpic != "" {
 			return a, fetchEpicChildren(a.client, a.dashboard.viewingEpic)
 		}
@@ -153,6 +156,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// API result messages that may need routing
 	case epicChildrenLoadedMsg:
 		a.dashboard = a.dashboard.SetEpicChildren(msg.issues, msg.epicKey)
+		return a, nil
+
+	case projectEpicsLoadedMsg:
+		a.dashboard = a.dashboard.SetProjectEpics(msg.issues, msg.projectKey, msg.total)
 		return a, nil
 
 	case issuesLoadedMsg:
@@ -342,6 +349,9 @@ func (a App) View() string {
 }
 
 func (a App) refreshDashboard() tea.Cmd {
+	if a.dashboard.viewingProjectEpics != "" {
+		return fetchProjectEpics(a.client, a.dashboard.viewingProjectEpics)
+	}
 	if a.dashboard.viewingEpic != "" {
 		return fetchEpicChildren(a.client, a.dashboard.viewingEpic)
 	}
@@ -367,8 +377,10 @@ func (a App) helpBar() string {
 		if a.dashboard.promptMode != promptNone {
 			return prefix + helpBarStyle.Render(" enter:confirm  esc:cancel")
 		}
-		base := " enter:view  o:open  x:epic  C:claude  T:tasks  W:workflow  c:create  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
-		if a.dashboard.viewingEpic != "" {
+		base := " enter:view  o:open  x:epic  E:epics  C:claude  T:tasks  W:workflow  c:create  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
+		if a.dashboard.viewingProjectEpics != "" {
+			base = " enter:view  m:my tickets  a:show/hide closed  x:epic  o:open  e:edit  t:transition  r:refresh  q:quit"
+		} else if a.dashboard.viewingEpic != "" {
 			base = " enter:view  m:my tickets  a:show/hide closed  C:claude  T:tasks  o:open  x:epic  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
 		}
 		bar = helpBarStyle.Render(base)

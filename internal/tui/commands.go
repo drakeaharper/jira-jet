@@ -108,6 +108,12 @@ type formClaudeFields struct {
 	Epic        string `json:"epic"`
 }
 
+type projectEpicsLoadedMsg struct {
+	issues     []jira.Issue
+	projectKey string
+	total      int
+}
+
 type clearErrMsg struct{}
 
 // fetchIssues searches for issues matching the given JQL.
@@ -250,6 +256,18 @@ func fetchEpicChildren(client *jira.Client, epicKey string) tea.Cmd {
 			return errMsg{err: err}
 		}
 		return epicChildrenLoadedMsg{issues: issues, epicKey: epicKey}
+	}
+}
+
+// fetchProjectEpics searches for epics in a project.
+func fetchProjectEpics(client *jira.Client, projectKey string) tea.Cmd {
+	return func() tea.Msg {
+		jql := fmt.Sprintf("project = \"%s\" AND issuetype = Epic ORDER BY updated DESC", projectKey)
+		resp, err := client.SearchIssues(jql, 50)
+		if err != nil {
+			return errMsg{err: err}
+		}
+		return projectEpicsLoadedMsg{issues: resp.Issues, projectKey: projectKey, total: resp.Total}
 	}
 }
 

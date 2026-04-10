@@ -38,6 +38,7 @@ type dashboardKeyMap struct {
 	Epic       key.Binding
 	BackToMine key.Binding
 	ToggleAll  key.Binding
+	Epics      key.Binding
 	Claude     key.Binding
 	Tasks      key.Binding
 	Workflow   key.Binding
@@ -91,6 +92,10 @@ var dashboardKeys = dashboardKeyMap{
 	ToggleAll: key.NewBinding(
 		key.WithKeys("a"),
 		key.WithHelp("a", "show/hide closed"),
+	),
+	Epics: key.NewBinding(
+		key.WithKeys("E"),
+		key.WithHelp("E", "list epics"),
 	),
 	Claude: key.NewBinding(
 		key.WithKeys("C"),

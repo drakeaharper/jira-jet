@@ -93,6 +93,7 @@ const (
 	promptNone promptMode = iota
 	promptOpenTicket
 	promptEpic
+	promptEpics
 	promptClaude
 	promptWorkflowPicker
 )
@@ -117,6 +118,11 @@ type DashboardModel struct {
 	viewingEpic  string // non-empty when viewing an epic's children
 	epicShowAll  bool   // when true, show closed tickets in epic view
 	allEpicItems []jira.Issue // unfiltered epic children for toggle
+
+	// Project epics viewing state
+	viewingProjectEpics string       // non-empty when viewing project epics
+	allProjectEpics     []jira.Issue // unfiltered project epics for toggle
+	projectEpicsShowAll bool         // when true, show closed epics
 
 	// Workflow picker state
 	workflows        []Workflow
@@ -189,7 +195,13 @@ func (d DashboardModel) SetIssues(issues []jira.Issue, total int) DashboardModel
 }
 
 func (d *DashboardModel) updateTitle() {
-	if d.viewingEpic != "" {
+	if d.viewingProjectEpics != "" {
+		label := "open"
+		if d.projectEpicsShowAll {
+			label = "all"
+		}
+		d.list.Title = fmt.Sprintf("Epics in %s (%d %s)", d.viewingProjectEpics, d.total, label)
+	} else if d.viewingEpic != "" {
 		label := "open"
 		if d.epicShowAll {
 			label = "all"
@@ -215,6 +227,37 @@ func (d DashboardModel) applyEpicFilter() DashboardModel {
 		filtered = d.allEpicItems
 	} else {
 		for _, issue := range d.allEpicItems {
+			status := strings.ToLower(issue.Fields.Status.Name)
+			if status != "closed" && status != "done" && status != "resolved" {
+				filtered = append(filtered, issue)
+			}
+		}
+	}
+	items := make([]list.Item, len(filtered))
+	for i, issue := range filtered {
+		items[i] = issueItem{issue: issue}
+	}
+	d.list.SetItems(items)
+	d.total = len(filtered)
+	d.updateTitle()
+	return d
+}
+
+func (d DashboardModel) SetProjectEpics(issues []jira.Issue, projectKey string, total int) DashboardModel {
+	d.viewingProjectEpics = projectKey
+	d.allProjectEpics = issues
+	d.loading = false
+	d.total = total
+	d = d.applyProjectEpicsFilter()
+	return d
+}
+
+func (d DashboardModel) applyProjectEpicsFilter() DashboardModel {
+	var filtered []jira.Issue
+	if d.projectEpicsShowAll {
+		filtered = d.allProjectEpics
+	} else {
+		for _, issue := range d.allProjectEpics {
 			status := strings.ToLower(issue.Fields.Status.Name)
 			if status != "closed" && status != "done" && status != "resolved" {
 				filtered = append(filtered, issue)
@@ -335,6 +378,9 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 				case promptEpic:
 					d.loading = true
 					return d, tea.Batch(d.spinner.Tick, fetchEpicChildren(client, value))
+				case promptEpics:
+					d.loading = true
+					return d, tea.Batch(d.spinner.Tick, fetchProjectEpics(client, value))
 				}
 				return d, nil
 			}
@@ -368,17 +414,32 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 			d.prompt.Focus()
 			return d, d.prompt.Focus()
 
+		case key.Matches(msg, dashboardKeys.Epics):
+			d.promptMode = promptEpics
+			d.prompt.Placeholder = "Enter project key (e.g. PROJ)"
+			d.prompt.SetValue("")
+			d.prompt.Focus()
+			return d, d.prompt.Focus()
+
 		case key.Matches(msg, dashboardKeys.BackToMine):
-			if d.viewingEpic != "" {
+			if d.viewingEpic != "" || d.viewingProjectEpics != "" {
 				d.viewingEpic = ""
 				d.allEpicItems = nil
 				d.epicShowAll = false
+				d.viewingProjectEpics = ""
+				d.allProjectEpics = nil
+				d.projectEpicsShowAll = false
 				d.loading = true
 				d.currentJQL = d.jql
 				return d, tea.Batch(d.spinner.Tick, fetchIssues(client, d.jql, 50))
 			}
 
 		case key.Matches(msg, dashboardKeys.ToggleAll):
+			if d.viewingProjectEpics != "" {
+				d.projectEpicsShowAll = !d.projectEpicsShowAll
+				d = d.applyProjectEpicsFilter()
+				return d, nil
+			}
 			if d.viewingEpic != "" {
 				d.epicShowAll = !d.epicShowAll
 				d = d.applyEpicFilter()
@@ -447,6 +508,9 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 
 		case key.Matches(msg, dashboardKeys.Refresh):
 			d.loading = true
+			if d.viewingProjectEpics != "" {
+				return d, tea.Batch(d.spinner.Tick, fetchProjectEpics(client, d.viewingProjectEpics))
+			}
 			if d.viewingEpic != "" {
 				return d, tea.Batch(d.spinner.Tick, fetchEpicChildren(client, d.viewingEpic))
 			}
@@ -522,6 +586,8 @@ func (d DashboardModel) View() string {
 			label = "Open ticket: "
 		case promptEpic:
 			label = "Epic key: "
+		case promptEpics:
+			label = "Project key: "
 		}
 		promptLine := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render(label) + d.prompt.View()
 		view = lipgloss.JoinVertical(lipgloss.Left, view, promptLine)
