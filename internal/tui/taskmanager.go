@@ -47,6 +47,7 @@ func DiscoverWorkflows() ([]Workflow, error) {
 		path := filepath.Join(workflowDir, e.Name())
 		content, err := os.ReadFile(path)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not read workflow file %s: %v\n", path, err)
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".md")
