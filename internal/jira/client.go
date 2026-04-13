@@ -270,6 +270,24 @@ func (c *Client) makeRequest(ctx context.Context, method, endpoint string, body 
 	return resp, nil
 }
 
+// checkResponse maps common HTTP error codes to user-friendly errors.
+// Returns nil when resp.StatusCode == successCode.
+func checkResponse(resp *http.Response, successCode int, resource string) error {
+	if resp.StatusCode == successCode {
+		return nil
+	}
+	switch resp.StatusCode {
+	case 401:
+		return fmt.Errorf("authentication failed - check your credentials")
+	case 403:
+		return fmt.Errorf("access denied to %s", resource)
+	case 404:
+		return fmt.Errorf("%s not found", resource)
+	default:
+		return fmt.Errorf("HTTP %d: request failed for %s", resp.StatusCode, resource)
+	}
+}
+
 func (c *Client) GetIssue(issueKey string) (*Issue, error) {
 	params := url.Values{}
 	params.Add("expand", "changelog,renderedFields")
@@ -283,17 +301,8 @@ func (c *Client) GetIssue(issueKey string) (*Issue, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("issue %s not found", issueKey)
-	}
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to view this issue")
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d: request failed", resp.StatusCode)
+	if err := checkResponse(resp, 200, "issue "+issueKey); err != nil {
+		return nil, err
 	}
 
 	var issue Issue
@@ -366,20 +375,7 @@ func (c *Client) AddComment(issueKey, comment string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 404 {
-		return fmt.Errorf("issue %s not found", issueKey)
-	}
-	if resp.StatusCode == 401 {
-		return fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return fmt.Errorf("access denied - you may not have permission to comment on this issue")
-	}
-	if resp.StatusCode != 201 {
-		return fmt.Errorf("HTTP %d: failed to add comment", resp.StatusCode)
-	}
-
-	return nil
+	return checkResponse(resp, 201, "issue "+issueKey)
 }
 
 func (c *Client) UpdateIssue(issueKey string, fields map[string]interface{}) error {
@@ -393,20 +389,7 @@ func (c *Client) UpdateIssue(issueKey string, fields map[string]interface{}) err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 404 {
-		return fmt.Errorf("issue %s not found", issueKey)
-	}
-	if resp.StatusCode == 401 {
-		return fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return fmt.Errorf("access denied - you may not have permission to update this issue")
-	}
-	if resp.StatusCode != 204 {
-		return fmt.Errorf("HTTP %d: failed to update issue", resp.StatusCode)
-	}
-
-	return nil
+	return checkResponse(resp, 204, "issue "+issueKey)
 }
 
 func (c *Client) CreateIssue(projectKey, summary, description, issueType, epicKey string) (*Issue, error) {
@@ -432,15 +415,8 @@ func (c *Client) CreateIssue(projectKey, summary, description, issueType, epicKe
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to create issues in this project")
-	}
-	if resp.StatusCode != 201 {
-		// Don't expose full response body as it might contain sensitive info
-		return nil, fmt.Errorf("HTTP %d: failed to create issue", resp.StatusCode)
+	if err := checkResponse(resp, 201, "issue creation"); err != nil {
+		return nil, err
 	}
 
 	var issue Issue
@@ -472,14 +448,10 @@ func (c *Client) SearchIssuesWithPagination(jql string, startAt int, maxResults 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to search issues")
-	}
 	if resp.StatusCode != 200 {
-		// Read response body for more context
+		if resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 404 {
+			return nil, checkResponse(resp, 200, "issue search")
+		}
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("HTTP %d: search failed - %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -535,17 +507,8 @@ func (c *Client) GetEpicChildren(epicKey string) ([]Issue, error) {
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode == 401 {
-			return nil, fmt.Errorf("authentication failed - check your credentials")
-		}
-		if resp.StatusCode == 403 {
-			return nil, fmt.Errorf("access denied - you may not have permission to view epic issues")
-		}
-		if resp.StatusCode == 404 {
-			return nil, fmt.Errorf("epic %s not found", epicKey)
-		}
-		if resp.StatusCode != 200 {
-			return nil, fmt.Errorf("HTTP %d: failed to get epic children", resp.StatusCode)
+		if err := checkResponse(resp, 200, "epic "+epicKey); err != nil {
+			return nil, err
 		}
 
 		var searchResp SearchResponse
@@ -602,14 +565,8 @@ func (c *Client) GetCurrentUser() (*User, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to view user information")
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d: failed to get current user", resp.StatusCode)
+	if err := checkResponse(resp, 200, "current user"); err != nil {
+		return nil, err
 	}
 
 	var user User
@@ -630,17 +587,8 @@ func (c *Client) GetTransitions(issueKey string) ([]Transition, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("issue %s not found", issueKey)
-	}
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to view transitions")
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d: failed to get transitions", resp.StatusCode)
+	if err := checkResponse(resp, 200, "issue "+issueKey+" transitions"); err != nil {
+		return nil, err
 	}
 
 	var transResp TransitionsResponse
@@ -665,24 +613,11 @@ func (c *Client) TransitionIssue(issueKey, transitionID string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 404 {
-		return fmt.Errorf("issue %s not found", issueKey)
-	}
-	if resp.StatusCode == 401 {
-		return fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return fmt.Errorf("access denied - you may not have permission to transition this issue")
-	}
 	if resp.StatusCode == 400 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("invalid transition - %s", string(bodyBytes))
 	}
-	if resp.StatusCode != 204 {
-		return fmt.Errorf("HTTP %d: failed to transition issue", resp.StatusCode)
-	}
-
-	return nil
+	return checkResponse(resp, 204, "issue "+issueKey+" transition")
 }
 
 // LinkIssues creates a link between two issues
@@ -713,24 +648,9 @@ func (c *Client) LinkIssues(inwardIssue, outwardIssue, linkType string, isInward
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 401 {
-		return fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return fmt.Errorf("access denied - you may not have permission to link issues")
-	}
-	if resp.StatusCode == 404 {
+	if resp.StatusCode == 400 || resp.StatusCode == 404 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("issue not found - %s", string(bodyBytes))
+		return fmt.Errorf("HTTP %d: link request failed - %s", resp.StatusCode, string(bodyBytes))
 	}
-	if resp.StatusCode == 400 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("invalid link request - %s", string(bodyBytes))
-	}
-	if resp.StatusCode != 201 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP %d: failed to create link - %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	return nil
+	return checkResponse(resp, 201, "issue link")
 }

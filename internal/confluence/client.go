@@ -148,6 +148,23 @@ func (c *Client) makeRequest(ctx context.Context, method, endpoint string, body 
 	return resp, nil
 }
 
+// checkResponse maps common HTTP error codes to user-friendly errors.
+func checkResponse(resp *http.Response, successCode int, resource string) error {
+	if resp.StatusCode == successCode {
+		return nil
+	}
+	switch resp.StatusCode {
+	case 401:
+		return fmt.Errorf("authentication failed - check your credentials")
+	case 403:
+		return fmt.Errorf("access denied to %s", resource)
+	case 404:
+		return fmt.Errorf("%s not found", resource)
+	default:
+		return fmt.Errorf("HTTP %d: request failed for %s", resp.StatusCode, resource)
+	}
+}
+
 // GetPage retrieves a Confluence page by ID
 func (c *Client) GetPage(pageID string) (*Page, error) {
 	params := url.Values{}
@@ -161,17 +178,8 @@ func (c *Client) GetPage(pageID string) (*Page, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("page %s not found", pageID)
-	}
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to view this page")
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d: request failed", resp.StatusCode)
+	if err := checkResponse(resp, 200, "page "+pageID); err != nil {
+		return nil, err
 	}
 
 	var page Page
@@ -196,14 +204,8 @@ func (c *Client) SearchPages(cql string, limit int) (*SearchResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to search")
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d: search failed", resp.StatusCode)
+	if err := checkResponse(resp, 200, "search"); err != nil {
+		return nil, err
 	}
 
 	var searchResp SearchResponse
@@ -236,17 +238,8 @@ func (c *Client) GetSpace(spaceKey string) (*Space, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("space %s not found", spaceKey)
-	}
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to view this space")
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d: request failed", resp.StatusCode)
+	if err := checkResponse(resp, 200, "space "+spaceKey); err != nil {
+		return nil, err
 	}
 
 	var result struct {
@@ -321,16 +314,13 @@ func (c *Client) CreatePage(spaceID, title, content string, parentID string) (*P
 	// Read the response body for better error messages
 	bodyBytes, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to create pages in this space")
-	}
-	if resp.StatusCode == 400 {
-		return nil, fmt.Errorf("invalid request: %s", string(bodyBytes))
-	}
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		if resp.StatusCode == 400 {
+			return nil, fmt.Errorf("invalid request: %s", string(bodyBytes))
+		}
+		if resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 404 {
+			return nil, checkResponse(resp, 200, "page creation")
+		}
 		return nil, fmt.Errorf("HTTP %d: failed to create page: %s", resp.StatusCode, string(bodyBytes))
 	}
 
@@ -375,23 +365,17 @@ func (c *Client) UpdatePage(pageID, title, content, spaceID string, version int,
 	// Read the response body for better error messages
 	bodyBytes, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to update this page")
-	}
-	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("page %s not found", pageID)
-	}
-	if resp.StatusCode == 409 {
-		return nil, fmt.Errorf("version conflict - page was modified by another user. Please retry the command")
-	}
-	if resp.StatusCode == 400 {
-		return nil, fmt.Errorf("invalid request: %s", string(bodyBytes))
-	}
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
-		return nil, fmt.Errorf("HTTP %d: failed to update page: %s", resp.StatusCode, string(bodyBytes))
+		switch resp.StatusCode {
+		case 400:
+			return nil, fmt.Errorf("invalid request: %s", string(bodyBytes))
+		case 409:
+			return nil, fmt.Errorf("version conflict - page was modified by another user. Please retry the command")
+		case 401, 403, 404:
+			return nil, checkResponse(resp, 200, "page "+pageID)
+		default:
+			return nil, fmt.Errorf("HTTP %d: failed to update page: %s", resp.StatusCode, string(bodyBytes))
+		}
 	}
 
 	var page Page
@@ -432,17 +416,8 @@ func (c *Client) GetChildPages(pageID string, limit int) (*ChildPagesResponse, e
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("page %s not found", pageID)
-	}
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("authentication failed - check your credentials")
-	}
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("access denied - you may not have permission to view this page")
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d: failed to get page children", resp.StatusCode)
+	if err := checkResponse(resp, 200, "page "+pageID+" children"); err != nil {
+		return nil, err
 	}
 
 	var childrenResp ChildPagesResponse
