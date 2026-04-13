@@ -2,6 +2,7 @@ package jira
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -249,7 +250,7 @@ func NewClient(baseURL, email, username, token string) *Client {
 	}
 }
 
-func (c *Client) makeRequest(method, endpoint string, body interface{}) (*http.Response, error) {
+func (c *Client) makeRequest(ctx context.Context, method, endpoint string, body interface{}) (*http.Response, error) {
 	var reqBody io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -260,7 +261,7 @@ func (c *Client) makeRequest(method, endpoint string, body interface{}) (*http.R
 	}
 
 	url := fmt.Sprintf("%s%s", c.BaseURL, endpoint)
-	req, err := http.NewRequest(method, url, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -295,7 +296,7 @@ func (c *Client) GetIssue(issueKey string) (*Issue, error) {
 
 	endpoint := fmt.Sprintf("/rest/api/2/issue/%s?%s", issueKey, params.Encode())
 
-	resp, err := c.makeRequest("GET", endpoint, nil)
+	resp, err := c.makeRequest(context.Background(), "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +379,7 @@ func (c *Client) AddComment(issueKey, comment string) error {
 	
 	reqBody := AddCommentRequest{Body: comment}
 	
-	resp, err := c.makeRequest("POST", endpoint, reqBody)
+	resp, err := c.makeRequest(context.Background(), "POST", endpoint, reqBody)
 	if err != nil {
 		return err
 	}
@@ -405,7 +406,7 @@ func (c *Client) UpdateIssue(issueKey string, fields map[string]interface{}) err
 	
 	reqBody := UpdateIssueRequest{Fields: fields}
 	
-	resp, err := c.makeRequest("PUT", endpoint, reqBody)
+	resp, err := c.makeRequest(context.Background(), "PUT", endpoint, reqBody)
 	if err != nil {
 		return err
 	}
@@ -444,7 +445,7 @@ func (c *Client) CreateIssue(projectKey, summary, description, issueType, epicKe
 		reqBody.Fields.Parent = &IssueRef{Key: epicKey}
 	}
 	
-	resp, err := c.makeRequest("POST", endpoint, reqBody)
+	resp, err := c.makeRequest(context.Background(), "POST", endpoint, reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -484,7 +485,7 @@ func (c *Client) SearchIssuesWithPagination(jql string, startAt int, maxResults 
 
 	endpoint := fmt.Sprintf("/rest/api/3/search/jql?%s", params.Encode())
 
-	resp, err := c.makeRequest("GET", endpoint, nil)
+	resp, err := c.makeRequest(context.Background(), "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +548,7 @@ func (c *Client) GetEpicChildren(epicKey string) ([]Issue, error) {
 
 		endpoint := fmt.Sprintf("/rest/agile/1.0/epic/%s/issue?%s", epicKey, params.Encode())
 
-		resp, err := c.makeRequest("GET", endpoint, nil)
+		resp, err := c.makeRequest(context.Background(), "GET", endpoint, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -614,7 +615,7 @@ func (c *Client) getEpicChildrenViaSearch(epicKey string) ([]Issue, error) {
 func (c *Client) GetCurrentUser() (*User, error) {
 	endpoint := "/rest/api/2/myself"
 	
-	resp, err := c.makeRequest("GET", endpoint, nil)
+	resp, err := c.makeRequest(context.Background(), "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -642,7 +643,7 @@ func (c *Client) GetCurrentUser() (*User, error) {
 func (c *Client) GetTransitions(issueKey string) ([]Transition, error) {
 	endpoint := fmt.Sprintf("/rest/api/2/issue/%s/transitions", issueKey)
 
-	resp, err := c.makeRequest("GET", endpoint, nil)
+	resp, err := c.makeRequest(context.Background(), "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -677,7 +678,7 @@ func (c *Client) TransitionIssue(issueKey, transitionID string) error {
 		Transition: TransitionRef{ID: transitionID},
 	}
 
-	resp, err := c.makeRequest("POST", endpoint, reqBody)
+	resp, err := c.makeRequest(context.Background(), "POST", endpoint, reqBody)
 	if err != nil {
 		return err
 	}
@@ -725,7 +726,7 @@ func (c *Client) LinkIssues(inwardIssue, outwardIssue, linkType string, isInward
 		},
 	}
 
-	resp, err := c.makeRequest("POST", endpoint, reqBody)
+	resp, err := c.makeRequest(context.Background(), "POST", endpoint, reqBody)
 	if err != nil {
 		return err
 	}

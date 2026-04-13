@@ -2,6 +2,7 @@ package confluence
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -127,7 +128,7 @@ func NewClient(baseURL, email, username, token string) *Client {
 	}
 }
 
-func (c *Client) makeRequest(method, endpoint string, body interface{}) (*http.Response, error) {
+func (c *Client) makeRequest(ctx context.Context, method, endpoint string, body interface{}) (*http.Response, error) {
 	var reqBody io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -138,7 +139,7 @@ func (c *Client) makeRequest(method, endpoint string, body interface{}) (*http.R
 	}
 
 	url := fmt.Sprintf("%s%s", c.BaseURL, endpoint)
-	req, err := http.NewRequest(method, url, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -173,7 +174,7 @@ func (c *Client) GetPage(pageID string) (*Page, error) {
 
 	endpoint := fmt.Sprintf("/wiki/api/v2/pages/%s?%s", pageID, params.Encode())
 
-	resp, err := c.makeRequest("GET", endpoint, nil)
+	resp, err := c.makeRequest(context.Background(), "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +209,7 @@ func (c *Client) SearchPages(cql string, limit int) (*SearchResponse, error) {
 
 	endpoint := fmt.Sprintf("/wiki/rest/api/search?%s", params.Encode())
 
-	resp, err := c.makeRequest("GET", endpoint, nil)
+	resp, err := c.makeRequest(context.Background(), "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +249,7 @@ func (c *Client) SearchBySpace(spaceKey string, limit int) (*SearchResponse, err
 func (c *Client) GetSpace(spaceKey string) (*Space, error) {
 	endpoint := fmt.Sprintf("/wiki/api/v2/spaces?keys=%s", spaceKey)
 
-	resp, err := c.makeRequest("GET", endpoint, nil)
+	resp, err := c.makeRequest(context.Background(), "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +331,7 @@ func (c *Client) CreatePage(spaceID, title, content string, parentID string) (*P
 
 	endpoint := "/wiki/api/v2/pages"
 
-	resp, err := c.makeRequest("POST", endpoint, createReq)
+	resp, err := c.makeRequest(context.Background(), "POST", endpoint, createReq)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +385,7 @@ func (c *Client) UpdatePage(pageID, title, content, spaceID string, version int,
 
 	endpoint := fmt.Sprintf("/wiki/api/v2/pages/%s", pageID)
 
-	resp, err := c.makeRequest("PUT", endpoint, updateReq)
+	resp, err := c.makeRequest(context.Background(), "PUT", endpoint, updateReq)
 	if err != nil {
 		return nil, err
 	}
@@ -444,7 +445,7 @@ func (c *Client) GetChildPages(pageID string, limit int) (*ChildPagesResponse, e
 
 	endpoint := fmt.Sprintf("/wiki/api/v2/pages/%s/children?%s", pageID, params.Encode())
 
-	resp, err := c.makeRequest("GET", endpoint, nil)
+	resp, err := c.makeRequest(context.Background(), "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
