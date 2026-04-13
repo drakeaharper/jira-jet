@@ -136,208 +136,204 @@ You can provide either a ticket key (e.g., LX-2894) or a full JIRA URL (e.g., ht
 	},
 }
 
+// Shared color palette for issue formatting.
+var (
+	colCyan    = color.New(color.FgCyan, color.Bold)
+	colYellow  = color.New(color.FgYellow, color.Bold)
+	colGreen   = color.New(color.FgGreen)
+	colBlue    = color.New(color.FgBlue)
+	colMagenta = color.New(color.FgMagenta)
+	colRed     = color.New(color.FgRed)
+	colGray    = color.New(color.FgHiBlack)
+)
+
 func formatIssueReadable(issue *jira.Issue) string {
 	var output strings.Builder
+	formatIssueHeader(&output, issue)
+	formatIssueFields(&output, issue)
+	formatIssueLinks(&output, issue)
+	formatIssuePeople(&output, issue)
+	formatIssueMetadata(&output, issue)
+	formatIssueDescription(&output, issue)
+	formatIssueAttachments(&output, issue)
+	formatIssueComments(&output, issue)
+	return output.String()
+}
 
-	// Define colors
-	cyan := color.New(color.FgCyan, color.Bold)
-	yellow := color.New(color.FgYellow, color.Bold)
-	green := color.New(color.FgGreen)
-	blue := color.New(color.FgBlue)
-	magenta := color.New(color.FgMagenta)
-	red := color.New(color.FgRed)
-	gray := color.New(color.FgHiBlack)
+func formatIssueHeader(w *strings.Builder, issue *jira.Issue) {
+	w.WriteString(colCyan.Sprintf("🎫 TICKET: %s\n", issue.Key))
+	w.WriteString(colGray.Sprint("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+	w.WriteString(fmt.Sprintf("%s %s\n", colYellow.Sprint("📝 Summary:"), issue.Fields.Summary))
 
-	// Ticket header
-	output.WriteString(cyan.Sprintf("🎫 TICKET: %s\n", issue.Key))
-	output.WriteString(gray.Sprint("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
-	
-	// Summary
-	output.WriteString(fmt.Sprintf("%s %s\n", yellow.Sprint("📝 Summary:"), issue.Fields.Summary))
-	
-	// Status with color coding
 	statusColor := getStatusColor(issue.Fields.Status.Name)
-	output.WriteString(fmt.Sprintf("%s %s\n", blue.Sprint("📊 Status:"), statusColor.Sprint(issue.Fields.Status.Name)))
-	
-	// Type
-	output.WriteString(fmt.Sprintf("%s %s\n", magenta.Sprint("🏷️  Type:"), issue.Fields.IssueType.Name))
-	
-	// Priority
+	w.WriteString(fmt.Sprintf("%s %s\n", colBlue.Sprint("📊 Status:"), statusColor.Sprint(issue.Fields.Status.Name)))
+	w.WriteString(fmt.Sprintf("%s %s\n", colMagenta.Sprint("🏷️  Type:"), issue.Fields.IssueType.Name))
+
 	if issue.Fields.Priority.Name != "" {
 		priorityColor := getPriorityColor(issue.Fields.Priority.Name)
-		output.WriteString(fmt.Sprintf("%s %s\n", red.Sprint("⚡ Priority:"), priorityColor.Sprint(issue.Fields.Priority.Name)))
+		w.WriteString(fmt.Sprintf("%s %s\n", colRed.Sprint("⚡ Priority:"), priorityColor.Sprint(issue.Fields.Priority.Name)))
 	} else {
-		output.WriteString(fmt.Sprintf("%s %s\n", red.Sprint("⚡ Priority:"), gray.Sprint("None")))
+		w.WriteString(fmt.Sprintf("%s %s\n", colRed.Sprint("⚡ Priority:"), colGray.Sprint("None")))
 	}
-	
-	// Project
-	output.WriteString(fmt.Sprintf("%s %s (%s)\n", green.Sprint("📁 Project:"), issue.Fields.Project.Name, green.Sprint(issue.Fields.Project.Key)))
 
-	// Epic Link
+	w.WriteString(fmt.Sprintf("%s %s (%s)\n", colGreen.Sprint("📁 Project:"), issue.Fields.Project.Name, colGreen.Sprint(issue.Fields.Project.Key)))
+}
+
+func formatIssueFields(w *strings.Builder, issue *jira.Issue) {
 	if issue.Fields.EpicLink != nil && issue.Fields.EpicLink.Key != "" {
 		if issue.Fields.EpicLink.Summary != "" {
-			output.WriteString(fmt.Sprintf("%s %s (%s)\n", cyan.Sprint("🎯 Epic:"), issue.Fields.EpicLink.Summary, cyan.Sprint(issue.Fields.EpicLink.Key)))
+			w.WriteString(fmt.Sprintf("%s %s (%s)\n", colCyan.Sprint("🎯 Epic:"), issue.Fields.EpicLink.Summary, colCyan.Sprint(issue.Fields.EpicLink.Key)))
 		} else {
-			output.WriteString(fmt.Sprintf("%s %s\n", cyan.Sprint("🎯 Epic:"), cyan.Sprint(issue.Fields.EpicLink.Key)))
+			w.WriteString(fmt.Sprintf("%s %s\n", colCyan.Sprint("🎯 Epic:"), colCyan.Sprint(issue.Fields.EpicLink.Key)))
 		}
 	} else if issue.Fields.Parent != nil && issue.Fields.Parent.Key != "" {
 		if issue.Fields.Parent.Summary != "" {
-			output.WriteString(fmt.Sprintf("%s %s (%s)\n", cyan.Sprint("🔗 Parent:"), issue.Fields.Parent.Summary, cyan.Sprint(issue.Fields.Parent.Key)))
+			w.WriteString(fmt.Sprintf("%s %s (%s)\n", colCyan.Sprint("🔗 Parent:"), issue.Fields.Parent.Summary, colCyan.Sprint(issue.Fields.Parent.Key)))
 		} else {
-			output.WriteString(fmt.Sprintf("%s %s\n", cyan.Sprint("🔗 Parent:"), cyan.Sprint(issue.Fields.Parent.Key)))
+			w.WriteString(fmt.Sprintf("%s %s\n", colCyan.Sprint("🔗 Parent:"), colCyan.Sprint(issue.Fields.Parent.Key)))
 		}
 	}
+}
 
-	// Linked Issues
-	if len(issue.Fields.IssueLinks) > 0 {
-		output.WriteString("\n")
-		output.WriteString(cyan.Sprintf("🔗 Linked Issues (%d):\n", len(issue.Fields.IssueLinks)))
-		output.WriteString(gray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
-
-		for _, link := range issue.Fields.IssueLinks {
-			var linkedIssue *jira.LinkedIssue
-			var relationshipText string
-
-			if link.OutwardIssue != nil {
-				linkedIssue = link.OutwardIssue
-				relationshipText = link.Type.Outward
-			} else if link.InwardIssue != nil {
-				linkedIssue = link.InwardIssue
-				relationshipText = link.Type.Inward
-			}
-
-			if linkedIssue != nil {
-				statusColor := getStatusColor(linkedIssue.Fields.Status.Name)
-				output.WriteString(fmt.Sprintf("  %s %s\n", magenta.Sprint(relationshipText+":"), cyan.Sprint(linkedIssue.Key)))
-				output.WriteString(fmt.Sprintf("    %s %s\n", gray.Sprint("Summary:"), linkedIssue.Fields.Summary))
-				output.WriteString(fmt.Sprintf("    %s %s | %s %s\n",
-					gray.Sprint("Status:"), statusColor.Sprint(linkedIssue.Fields.Status.Name),
-					gray.Sprint("Type:"), linkedIssue.Fields.IssueType.Name))
-			}
-		}
-		output.WriteString("\n")
+func formatIssueLinks(w *strings.Builder, issue *jira.Issue) {
+	if len(issue.Fields.IssueLinks) == 0 {
+		return
 	}
+	w.WriteString("\n")
+	w.WriteString(colCyan.Sprintf("🔗 Linked Issues (%d):\n", len(issue.Fields.IssueLinks)))
+	w.WriteString(colGray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
 
-	// Assignee
+	for _, link := range issue.Fields.IssueLinks {
+		var linkedIssue *jira.LinkedIssue
+		var relationshipText string
+		if link.OutwardIssue != nil {
+			linkedIssue = link.OutwardIssue
+			relationshipText = link.Type.Outward
+		} else if link.InwardIssue != nil {
+			linkedIssue = link.InwardIssue
+			relationshipText = link.Type.Inward
+		}
+		if linkedIssue != nil {
+			sc := getStatusColor(linkedIssue.Fields.Status.Name)
+			w.WriteString(fmt.Sprintf("  %s %s\n", colMagenta.Sprint(relationshipText+":"), colCyan.Sprint(linkedIssue.Key)))
+			w.WriteString(fmt.Sprintf("    %s %s\n", colGray.Sprint("Summary:"), linkedIssue.Fields.Summary))
+			w.WriteString(fmt.Sprintf("    %s %s | %s %s\n",
+				colGray.Sprint("Status:"), sc.Sprint(linkedIssue.Fields.Status.Name),
+				colGray.Sprint("Type:"), linkedIssue.Fields.IssueType.Name))
+		}
+	}
+	w.WriteString("\n")
+}
+
+func formatIssuePeople(w *strings.Builder, issue *jira.Issue) {
 	if issue.Fields.Assignee != nil {
-		assigneeName := issue.Fields.Assignee.DisplayName
-		if assigneeName == "" {
-			assigneeName = issue.Fields.Assignee.Name
+		name := issue.Fields.Assignee.DisplayName
+		if name == "" {
+			name = issue.Fields.Assignee.Name
 		}
-		output.WriteString(fmt.Sprintf("%s %s\n", blue.Sprint("👤 Assignee:"), assigneeName))
+		w.WriteString(fmt.Sprintf("%s %s\n", colBlue.Sprint("👤 Assignee:"), name))
 	} else {
-		output.WriteString(fmt.Sprintf("%s %s\n", blue.Sprint("👤 Assignee:"), gray.Sprint("Unassigned")))
+		w.WriteString(fmt.Sprintf("%s %s\n", colBlue.Sprint("👤 Assignee:"), colGray.Sprint("Unassigned")))
 	}
 
-	// Reporter
 	if issue.Fields.Reporter != nil {
-		reporterName := issue.Fields.Reporter.DisplayName
-		if reporterName == "" {
-			reporterName = issue.Fields.Reporter.Name
+		name := issue.Fields.Reporter.DisplayName
+		if name == "" {
+			name = issue.Fields.Reporter.Name
 		}
-		output.WriteString(fmt.Sprintf("%s %s\n", blue.Sprint("📝 Reporter:"), reporterName))
+		w.WriteString(fmt.Sprintf("%s %s\n", colBlue.Sprint("📝 Reporter:"), name))
 	}
+}
 
-	// Labels
+func formatIssueMetadata(w *strings.Builder, issue *jira.Issue) {
 	if len(issue.Fields.Labels) > 0 {
-		output.WriteString(fmt.Sprintf("%s %s\n", magenta.Sprint("🏷️  Labels:"), strings.Join(issue.Fields.Labels, ", ")))
+		w.WriteString(fmt.Sprintf("%s %s\n", colMagenta.Sprint("🏷️  Labels:"), strings.Join(issue.Fields.Labels, ", ")))
 	}
-
-	// Components
 	if len(issue.Fields.Components) > 0 {
-		var compNames []string
+		var names []string
 		for _, comp := range issue.Fields.Components {
-			compNames = append(compNames, comp.Name)
+			names = append(names, comp.Name)
 		}
-		output.WriteString(fmt.Sprintf("%s %s\n", green.Sprint("🔧 Components:"), strings.Join(compNames, ", ")))
+		w.WriteString(fmt.Sprintf("%s %s\n", colGreen.Sprint("🔧 Components:"), strings.Join(names, ", ")))
 	}
-
-	// Fix Versions
 	if len(issue.Fields.FixVersions) > 0 {
-		var versionNames []string
-		for _, version := range issue.Fields.FixVersions {
-			versionNames = append(versionNames, version.Name)
+		var names []string
+		for _, v := range issue.Fields.FixVersions {
+			names = append(names, v.Name)
 		}
-		output.WriteString(fmt.Sprintf("%s %s\n", yellow.Sprint("🎯 Fix Versions:"), strings.Join(versionNames, ", ")))
+		w.WriteString(fmt.Sprintf("%s %s\n", colYellow.Sprint("🎯 Fix Versions:"), strings.Join(names, ", ")))
 	}
-
-	// Dates
 	if len(issue.Fields.Created) >= 10 {
-		output.WriteString(fmt.Sprintf("%s %s\n", gray.Sprint("📅 Created:"), issue.Fields.Created[:10]))
+		w.WriteString(fmt.Sprintf("%s %s\n", colGray.Sprint("📅 Created:"), issue.Fields.Created[:10]))
 	}
 	if len(issue.Fields.Updated) >= 10 {
-		output.WriteString(fmt.Sprintf("%s %s\n", gray.Sprint("🔄 Updated:"), issue.Fields.Updated[:10]))
+		w.WriteString(fmt.Sprintf("%s %s\n", colGray.Sprint("🔄 Updated:"), issue.Fields.Updated[:10]))
 	}
+}
 
-	// Description
-	if issue.Fields.DescriptionText != "" {
-		output.WriteString("\n")
-		output.WriteString(yellow.Sprint("📖 Description:\n"))
-		output.WriteString(gray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
-		formattedDescription := formatHTMLContent(issue.Fields.DescriptionText)
-		output.WriteString(formattedDescription + "\n")
+func formatIssueDescription(w *strings.Builder, issue *jira.Issue) {
+	if issue.Fields.DescriptionText == "" {
+		return
 	}
+	w.WriteString("\n")
+	w.WriteString(colYellow.Sprint("📖 Description:\n"))
+	w.WriteString(colGray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
+	w.WriteString(formatHTMLContent(issue.Fields.DescriptionText) + "\n")
+}
 
-	// Attachments
+func formatIssueAttachments(w *strings.Builder, issue *jira.Issue) {
 	attachments := issue.Fields.Attachment
-	if len(attachments) > 0 {
-		output.WriteString("\n")
-		output.WriteString(green.Sprintf("📎 Attachments (%d):\n", len(attachments)))
-		output.WriteString(gray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
-		
-		for i, attachment := range attachments {
-			authorName := attachment.Author.DisplayName
-			if authorName == "" {
-				authorName = attachment.Author.Name
-			}
-			created := attachment.Created
-			if len(created) >= 10 {
-				created = created[:10]
-			}
-			
-			// Format file size
-			size := formatFileSize(attachment.Size)
-			
-			output.WriteString(fmt.Sprintf("%s %s (%s)\n", yellow.Sprintf("%d.", i+1), attachment.Filename, blue.Sprint(size)))
-			output.WriteString(fmt.Sprintf("   %s %s\n", gray.Sprint("Type:"), attachment.MimeType))
-			output.WriteString(fmt.Sprintf("   %s %s (%s)\n", gray.Sprint("Uploaded by:"), authorName, created))
-			if attachment.Content != "" {
-				output.WriteString(fmt.Sprintf("   %s %s\n", gray.Sprint("URL:"), attachment.Content))
-			}
-			output.WriteString("\n")
-		}
+	if len(attachments) == 0 {
+		return
 	}
+	w.WriteString("\n")
+	w.WriteString(colGreen.Sprintf("📎 Attachments (%d):\n", len(attachments)))
+	w.WriteString(colGray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
 
-	// Comments
+	for i, a := range attachments {
+		authorName := a.Author.DisplayName
+		if authorName == "" {
+			authorName = a.Author.Name
+		}
+		created := a.Created
+		if len(created) >= 10 {
+			created = created[:10]
+		}
+		w.WriteString(fmt.Sprintf("%s %s (%s)\n", colYellow.Sprintf("%d.", i+1), a.Filename, colBlue.Sprint(formatFileSize(a.Size))))
+		w.WriteString(fmt.Sprintf("   %s %s\n", colGray.Sprint("Type:"), a.MimeType))
+		w.WriteString(fmt.Sprintf("   %s %s (%s)\n", colGray.Sprint("Uploaded by:"), authorName, created))
+		if a.Content != "" {
+			w.WriteString(fmt.Sprintf("   %s %s\n", colGray.Sprint("URL:"), a.Content))
+		}
+		w.WriteString("\n")
+	}
+}
+
+func formatIssueComments(w *strings.Builder, issue *jira.Issue) {
 	comments := issue.Fields.Comment.Comments
-	if len(comments) > 0 {
-		output.WriteString("\n")
-		output.WriteString(cyan.Sprintf("💬 Comments (%d):\n", len(comments)))
-		output.WriteString(gray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
-		
-		// Show last 5 comments
-		start := 0
-		if len(comments) > 5 {
-			start = len(comments) - 5
-		}
-		
-		for i, comment := range comments[start:] {
-			authorName := comment.Author.DisplayName
-			if authorName == "" {
-				authorName = comment.Author.Name
-			}
-			created := comment.Created
-			if len(created) >= 10 {
-				created = created[:10]
-			}
-			
-			output.WriteString(fmt.Sprintf("%s %s (%s):\n", yellow.Sprintf("%d.", i+1), authorName, gray.Sprint(created)))
-			formattedComment := formatHTMLContent(comment.Body)
-			output.WriteString(fmt.Sprintf("   %s\n\n", formattedComment))
-		}
+	if len(comments) == 0 {
+		return
 	}
+	w.WriteString("\n")
+	w.WriteString(colCyan.Sprintf("💬 Comments (%d):\n", len(comments)))
+	w.WriteString(colGray.Sprint("━━━━━━━━━━━━━━━━━━━━\n"))
 
-	return output.String()
+	start := 0
+	if len(comments) > 5 {
+		start = len(comments) - 5
+	}
+	for i, c := range comments[start:] {
+		authorName := c.Author.DisplayName
+		if authorName == "" {
+			authorName = c.Author.Name
+		}
+		created := c.Created
+		if len(created) >= 10 {
+			created = created[:10]
+		}
+		w.WriteString(fmt.Sprintf("%s %s (%s):\n", colYellow.Sprintf("%d.", i+1), authorName, colGray.Sprint(created)))
+		w.WriteString(fmt.Sprintf("   %s\n\n", formatHTMLContent(c.Body)))
+	}
 }
 
 // Helper functions for color coding
