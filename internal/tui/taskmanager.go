@@ -382,13 +382,13 @@ func (tm *TaskManager) ClearTask(issueKey string) bool {
 	return false
 }
 
-// ClearFailedTasks removes all failed tasks and their output files.
-func (tm *TaskManager) ClearFailedTasks() {
+// ClearNonRunningTasks removes all completed and failed tasks and their output files.
+func (tm *TaskManager) ClearNonRunningTasks() {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	filtered := tm.tasks[:0]
 	for _, t := range tm.tasks {
-		if t.Status == TaskFailed {
+		if t.Status != TaskRunning {
 			if t.OutputFile != "" {
 				os.Remove(t.OutputFile)
 			}

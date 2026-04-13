@@ -228,7 +228,7 @@ func (tv TaskViewerModel) Update(msg tea.Msg) (TaskViewerModel, tea.Cmd) {
 		case msg.String() == "x":
 			if tv.selected < len(tv.tasks) {
 				task := tv.tasks[tv.selected]
-				if task.Status == TaskFailed {
+				if task.Status != TaskRunning {
 					tv.taskManager.ClearTask(task.IssueKey)
 					tv.tasks = tv.taskManager.Tasks()
 					if tv.selected >= len(tv.tasks) {
@@ -238,7 +238,7 @@ func (tv TaskViewerModel) Update(msg tea.Msg) (TaskViewerModel, tea.Cmd) {
 			}
 			return tv, nil
 		case msg.String() == "X":
-			tv.taskManager.ClearFailedTasks()
+			tv.taskManager.ClearNonRunningTasks()
 			tv.tasks = tv.taskManager.Tasks()
 			tv.selected = 0
 			return tv, nil

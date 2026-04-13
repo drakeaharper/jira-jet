@@ -410,7 +410,7 @@ func (a App) helpBar() string {
 	case viewTaskViewer:
 		switch a.taskViewer.mode {
 		case taskViewList:
-			bar = helpBarStyle.Render(" j/k:navigate  enter:view output  l:live logs  f:files  K:kill  x:clear error  X:clear all errors  r:refresh  u:back")
+			bar = helpBarStyle.Render(" j/k:navigate  enter:view output  l:live logs  f:files  K:kill  x:clear task  X:clear all done  r:refresh  u:back")
 		case taskViewFiles:
 			bar = helpBarStyle.Render(" j/k:navigate  enter:view  x:delete file  X:delete all  r:refresh  u:back")
 		case taskViewLogs:
