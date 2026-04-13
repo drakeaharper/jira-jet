@@ -1,2 +1,19 @@
 .jet/
 jet
+dist/
+
+# Environment and secrets
+.env
+.env.*
+
+# Editor temp files
+*.swp
+*.swo
+*~
+
+# IDE config
+.idea/
+.vscode/
+
+# Test binaries
+*.test
