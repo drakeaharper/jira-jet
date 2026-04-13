@@ -134,7 +134,7 @@ Use --space to limit search to a specific space.`,
 		var results *confluence.SearchResponse
 		if conSearchSpace != "" {
 			// Build CQL with space filter and text search
-			cql := fmt.Sprintf("type=page AND space=\"%s\" AND text~\"%s\"", conSearchSpace, query)
+			cql := fmt.Sprintf("type=page AND space=\"%s\" AND text~\"%s\"", confluence.EscapeString(conSearchSpace), confluence.EscapeString(query))
 			results, err = client.SearchPages(cql, conSearchLimit)
 		} else {
 			results, err = client.SearchByText(query, conSearchLimit)

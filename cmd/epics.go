@@ -45,7 +45,7 @@ Examples:
 		client := jira.NewClient(cfg.URL, cfg.Email, cfg.Username, cfg.Token)
 
 		// Build JQL
-		jql := fmt.Sprintf("project = \"%s\" AND issuetype = Epic", projectKey)
+		jql := fmt.Sprintf("project = \"%s\" AND issuetype = Epic", jira.EscapeString(projectKey))
 		if !epicsShowAll {
 			jql += " AND status NOT IN (\"Done\", \"Closed\", \"Resolved\")"
 		}

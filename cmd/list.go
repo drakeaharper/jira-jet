@@ -50,18 +50,18 @@ Examples:
 		} else if listAssignee == "unassigned" {
 			jqlParts = append(jqlParts, "assignee is EMPTY")
 		} else if listAssignee != "" {
-			jqlParts = append(jqlParts, fmt.Sprintf("assignee = \"%s\"", listAssignee))
+			jqlParts = append(jqlParts, fmt.Sprintf("assignee = \"%s\"", jira.EscapeString(listAssignee)))
 		}
 
 		// Handle status
 		if listStatus != "" {
 			statuses := strings.Split(listStatus, ",")
 			if len(statuses) == 1 {
-				jqlParts = append(jqlParts, fmt.Sprintf("status = \"%s\"", strings.TrimSpace(statuses[0])))
+				jqlParts = append(jqlParts, fmt.Sprintf("status = \"%s\"", jira.EscapeString(strings.TrimSpace(statuses[0]))))
 			} else {
 				statusList := make([]string, len(statuses))
 				for i, s := range statuses {
-					statusList[i] = fmt.Sprintf("\"%s\"", strings.TrimSpace(s))
+					statusList[i] = fmt.Sprintf("\"%s\"", jira.EscapeString(strings.TrimSpace(s)))
 				}
 				jqlParts = append(jqlParts, fmt.Sprintf("status IN (%s)", strings.Join(statusList, ",")))
 			}
@@ -69,7 +69,7 @@ Examples:
 
 		// Handle project
 		if listProject != "" {
-			jqlParts = append(jqlParts, fmt.Sprintf("project = \"%s\"", listProject))
+			jqlParts = append(jqlParts, fmt.Sprintf("project = \"%s\"", jira.EscapeString(listProject)))
 		}
 
 		// Build final JQL

@@ -90,6 +90,14 @@ type Space struct {
 	Status      string     `json:"status"`
 }
 
+// EscapeString escapes special characters in a CQL string literal.
+// Use this when interpolating user input into CQL queries inside double quotes.
+func EscapeString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
 func NewClient(baseURL, email, username, token string) *Client {
 	// Configure secure TLS settings (same as JIRA)
 	tlsConfig := &tls.Config{
@@ -226,13 +234,13 @@ func (c *Client) SearchPages(cql string, limit int) (*SearchResponse, error) {
 
 // SearchByText is a convenience method for simple text searches
 func (c *Client) SearchByText(searchText string, limit int) (*SearchResponse, error) {
-	cql := fmt.Sprintf("type=page AND text~\"%s\"", searchText)
+	cql := fmt.Sprintf("type=page AND text~\"%s\"", EscapeString(searchText))
 	return c.SearchPages(cql, limit)
 }
 
 // SearchBySpace searches for pages within a specific space
 func (c *Client) SearchBySpace(spaceKey string, limit int) (*SearchResponse, error) {
-	cql := fmt.Sprintf("type=page AND space=\"%s\"", spaceKey)
+	cql := fmt.Sprintf("type=page AND space=\"%s\"", EscapeString(spaceKey))
 	return c.SearchPages(cql, limit)
 }
 

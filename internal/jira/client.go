@@ -212,6 +212,14 @@ type IssueLinkType struct {
 	Name string `json:"name"`
 }
 
+// EscapeString escapes special characters in a JQL string literal.
+// Use this when interpolating user input into JQL queries inside double quotes.
+func EscapeString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
 func NewClient(baseURL, email, username, token string) *Client {
 	// Configure secure TLS settings
 	tlsConfig := &tls.Config{
