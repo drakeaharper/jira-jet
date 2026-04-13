@@ -122,14 +122,14 @@ func saveAsEnvVars(url, email, username, token string) error {
 	return nil
 }
 
-func saveToConfigFile(url, email, username, token string) error {
+func saveToConfigFile(jiraURL, email, username, token string) (retErr error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	configPath := filepath.Join(homeDir, ".jira_config")
-	
+
 	// Check if file exists and read existing content
 	var existingContent []string
 	if _, err := os.Stat(configPath); err == nil {
@@ -169,7 +169,11 @@ func saveToConfigFile(url, email, username, token string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if cerr := file.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("failed to flush config file: %w", cerr)
+		}
+	}()
 
 	// Write existing content first
 	for _, line := range existingContent {
@@ -178,7 +182,7 @@ func saveToConfigFile(url, email, username, token string) error {
 
 	// Add JIRA section
 	fmt.Fprintln(file, "[jira]")
-	fmt.Fprintf(file, "url=%s\n", url)
+	fmt.Fprintf(file, "url=%s\n", jiraURL)
 	if email != "" {
 		fmt.Fprintf(file, "email=%s\n", email)
 	}
