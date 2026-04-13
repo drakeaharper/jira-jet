@@ -3,14 +3,14 @@ package confluence
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
+
+	"jet/internal/httpclient"
 )
 
 type Client struct {
@@ -100,31 +100,12 @@ func EscapeString(s string) string {
 }
 
 func NewClient(baseURL, email, username, token string) *Client {
-	// Configure secure TLS settings (same as JIRA)
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-		},
-		PreferServerCipherSuites: true,
-	}
-
-	transport := &http.Transport{
-		TLSClientConfig: tlsConfig,
-	}
-
 	return &Client{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		Email:      email,
 		Username:   username,
 		Token:      token,
-		HTTPClient: &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: transport,
-		},
+		HTTPClient: httpclient.New(httpclient.DefaultTimeout),
 	}
 }
 
