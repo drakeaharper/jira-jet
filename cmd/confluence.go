@@ -240,18 +240,24 @@ func convertStorageFormatToText(storageHTML string) string {
 	content = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(content, "")
 
 	// Decode HTML entities
-	content = strings.ReplaceAll(content, "&nbsp;", " ")
-	content = strings.ReplaceAll(content, "&amp;", "&")
-	content = strings.ReplaceAll(content, "&lt;", "<")
-	content = strings.ReplaceAll(content, "&gt;", ">")
-	content = strings.ReplaceAll(content, "&quot;", "\"")
-	content = strings.ReplaceAll(content, "&#39;", "'")
+	content = decodeHTMLEntities(content)
 
 	// Clean up excessive whitespace
 	content = regexp.MustCompile(`\n{3,}`).ReplaceAllString(content, "\n\n")
 	content = strings.TrimSpace(content)
 
 	return content
+}
+
+// decodeHTMLEntities replaces common HTML character entities with their literals.
+func decodeHTMLEntities(s string) string {
+	s = strings.ReplaceAll(s, "&nbsp;", " ")
+	s = strings.ReplaceAll(s, "&amp;", "&")
+	s = strings.ReplaceAll(s, "&lt;", "<")
+	s = strings.ReplaceAll(s, "&gt;", ">")
+	s = strings.ReplaceAll(s, "&quot;", "\"")
+	s = strings.ReplaceAll(s, "&#39;", "'")
+	return s
 }
 
 func formatSearchResults(results *confluence.SearchResponse) string {
@@ -308,22 +314,11 @@ func formatSearchResults(results *confluence.SearchResponse) string {
 }
 
 func stripHTMLTags(html string) string {
-	// Remove HTML tags
 	re := regexp.MustCompile(`<[^>]+>`)
 	text := re.ReplaceAllString(html, "")
-
-	// Decode common HTML entities
-	text = strings.ReplaceAll(text, "&nbsp;", " ")
-	text = strings.ReplaceAll(text, "&amp;", "&")
-	text = strings.ReplaceAll(text, "&lt;", "<")
-	text = strings.ReplaceAll(text, "&gt;", ">")
-	text = strings.ReplaceAll(text, "&quot;", "\"")
-	text = strings.ReplaceAll(text, "&#39;", "'")
-
-	// Clean up whitespace
+	text = decodeHTMLEntities(text)
 	text = strings.TrimSpace(text)
 	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
-
 	return text
 }
 
