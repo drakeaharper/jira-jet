@@ -31,9 +31,9 @@ Examples:
   jet epic PROJ-123 --format json
   jet epic PROJ-123 --output children.txt`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		epicKey := args[0]
-		
+
 		// Extract ticket key from URL if provided
 		if strings.Contains(epicKey, "/browse/") {
 			parts := strings.Split(epicKey, "/browse/")
@@ -44,16 +44,14 @@ Examples:
 
 		cfg, err := config.Load()
 		if err != nil {
-			fmt.Printf("Error loading config: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("configuration error: %w", err)
 		}
 
 		client := jira.NewClient(cfg.URL, cfg.Email, cfg.Username, cfg.Token)
-		
+
 		children, err := client.GetEpicChildren(epicKey)
 		if err != nil {
-			fmt.Printf("Error fetching epic children: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to fetch epic children: %w", err)
 		}
 
 		// Filter out closed tickets unless --all flag is used
@@ -74,15 +72,14 @@ Examples:
 			} else {
 				fmt.Printf("No open child tickets found for epic %s (use --all to show closed tickets)\n", epicKey)
 			}
-			return
+			return nil
 		}
 
 		var output string
 		if epicFormat == "json" {
 			jsonData, err := json.MarshalIndent(children, "", "  ")
 			if err != nil {
-				fmt.Printf("Error formatting JSON: %v\n", err)
-				os.Exit(1)
+				return fmt.Errorf("failed to format JSON: %w", err)
 			}
 			output = string(jsonData)
 		} else {
@@ -92,13 +89,14 @@ Examples:
 		if epicOutput != "" {
 			err := os.WriteFile(epicOutput, []byte(output), 0644)
 			if err != nil {
-				fmt.Printf("Error writing to file: %v\n", err)
-				os.Exit(1)
+				return fmt.Errorf("failed to write to file: %w", err)
 			}
 			fmt.Printf("Epic children written to %s\n", epicOutput)
 		} else {
 			fmt.Print(output)
 		}
+
+		return nil
 	},
 }
 
