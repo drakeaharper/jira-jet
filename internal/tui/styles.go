@@ -79,6 +79,24 @@ func StatusStyle(status string) lipgloss.Style {
 	}
 }
 
+// IssueTypeStyle returns a lipgloss style for a given Jira issue type name.
+func IssueTypeStyle(issueType string) lipgloss.Style {
+	switch strings.ToLower(issueType) {
+	case "epic":
+		return lipgloss.NewStyle().Foreground(colorMagenta)
+	case "bug":
+		return lipgloss.NewStyle().Foreground(colorRed)
+	case "story":
+		return lipgloss.NewStyle().Foreground(colorGreen)
+	case "task":
+		return lipgloss.NewStyle().Foreground(colorBlue)
+	case "sub-task", "subtask":
+		return lipgloss.NewStyle().Foreground(colorGray)
+	default:
+		return lipgloss.NewStyle().Foreground(colorWhite)
+	}
+}
+
 // PriorityStyle returns a lipgloss style for a given Jira priority name.
 func PriorityStyle(priority string) lipgloss.Style {
 	switch strings.ToLower(priority) {

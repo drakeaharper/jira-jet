@@ -61,11 +61,17 @@ func (d issueDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	parts := []string{status}
 
 	if issue.Fields.IssueType.Name != "" {
-		parts = append(parts, dimStyle.Render(issue.Fields.IssueType.Name))
+		parts = append(parts, IssueTypeStyle(issue.Fields.IssueType.Name).Render(issue.Fields.IssueType.Name))
 	}
-	if issue.Fields.Priority.Name != "" {
-		parts = append(parts, PriorityStyle(issue.Fields.Priority.Name).Render(issue.Fields.Priority.Name))
+
+	reporter := "Unassigned"
+	if issue.Fields.Reporter != nil {
+		reporter = issue.Fields.Reporter.DisplayName
+		if reporter == "" {
+			reporter = issue.Fields.Reporter.Name
+		}
 	}
+	parts = append(parts, dimStyle.Render(reporter))
 
 	assignee := "Unassigned"
 	if issue.Fields.Assignee != nil {
@@ -74,7 +80,7 @@ func (d issueDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 			assignee = issue.Fields.Assignee.Name
 		}
 	}
-	parts = append(parts, dimStyle.Render(assignee))
+	parts = append(parts, lipgloss.NewStyle().Foreground(colorWhite).Render(assignee))
 
 	line2 := "  " + strings.Join(parts, dimStyle.Render(" | "))
 
