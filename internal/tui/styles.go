@@ -2,8 +2,20 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
+)
+
+// Duration constants for notifications and timeouts.
+const (
+	NotifyShort  = 3 * time.Second
+	NotifyMedium = 5 * time.Second
+	NotifyLong   = 8 * time.Second
+	NotifyXLong  = 10 * time.Second
+
+	ClaudeFormTimeout     = 3 * time.Minute
+	ClaudeWorkflowTimeout = 5 * time.Minute
 )
 
 // Colors

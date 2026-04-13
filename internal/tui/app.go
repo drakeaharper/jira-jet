@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -107,7 +106,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errMsg:
 		a.err = msg.err
 		a.errMsg = msg.err.Error()
-		cmds = append(cmds, clearErrAfter(5*time.Second))
+		cmds = append(cmds, clearErrAfter(NotifyMedium))
 		return a, tea.Batch(cmds...)
 
 	case clearErrMsg:
@@ -208,35 +207,35 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case launchClaudeTaskMsg:
 		if a.taskManager.IsRunning(msg.issue.Key) {
 			a.errMsg = fmt.Sprintf("[%s] Task already running", msg.issue.Key)
-			cmds = append(cmds, clearErrAfter(3*time.Second))
+			cmds = append(cmds, clearErrAfter(NotifyShort))
 			return a, tea.Batch(cmds...)
 		}
 		if err := a.taskManager.LaunchTask(msg.issue, msg.instruction, msg.workflowContent); err != nil {
 			a.errMsg = fmt.Sprintf("Failed to launch task: %s", err)
-			cmds = append(cmds, clearErrAfter(5*time.Second))
+			cmds = append(cmds, clearErrAfter(NotifyMedium))
 			return a, tea.Batch(cmds...)
 		}
 		a.notification = fmt.Sprintf("[%s] Claude task launched", msg.issue.Key)
-		cmds = append(cmds, clearNotificationAfter(3*time.Second))
+		cmds = append(cmds, clearNotificationAfter(NotifyShort))
 		return a, tea.Batch(cmds...)
 
 	case claudeTaskDoneMsg:
 		if msg.err != nil {
 			a.errMsg = fmt.Sprintf("[%s] Claude task failed: %s", msg.issueKey, msg.err)
-			cmds = append(cmds, clearErrAfter(8*time.Second))
+			cmds = append(cmds, clearErrAfter(NotifyLong))
 		} else {
 			a.notification = fmt.Sprintf("[%s] Claude task completed ($%.4f)", msg.issueKey, msg.task.Cost)
-			cmds = append(cmds, clearNotificationAfter(10*time.Second))
+			cmds = append(cmds, clearNotificationAfter(NotifyXLong))
 		}
 		return a, tea.Batch(cmds...)
 
 	case cancelClaudeTaskMsg:
 		if a.taskManager.KillTask(msg.issueKey) {
 			a.notification = fmt.Sprintf("[%s] Task cancelled", msg.issueKey)
-			cmds = append(cmds, clearNotificationAfter(5*time.Second))
+			cmds = append(cmds, clearNotificationAfter(NotifyMedium))
 		} else {
 			a.errMsg = fmt.Sprintf("[%s] No running task to cancel", msg.issueKey)
-			cmds = append(cmds, clearErrAfter(3*time.Second))
+			cmds = append(cmds, clearErrAfter(NotifyShort))
 		}
 		return a, tea.Batch(cmds...)
 
@@ -262,7 +261,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.viewStack = a.viewStack[:len(a.viewStack)-1]
 		}
 		a.notification = fmt.Sprintf("Workflow saved to %s", msg.path)
-		cmds = append(cmds, clearNotificationAfter(5*time.Second))
+		cmds = append(cmds, clearNotificationAfter(NotifyMedium))
 		return a, tea.Batch(cmds...)
 
 	case workflowEditorResponseMsg:

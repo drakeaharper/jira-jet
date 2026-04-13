@@ -427,7 +427,7 @@ func (m WorkflowEditorModel) Update(msg tea.Msg) (WorkflowEditorModel, tea.Cmd) 
 				m.chatHistory = append(m.chatHistory, chatEntry{role: "user", content: text})
 				m.loading = true
 				m.loadingStart = time.Now()
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				ctx, cancel := context.WithTimeout(context.Background(), ClaudeWorkflowTimeout)
 				m.cancelClaude = cancel
 				m.chatViewport.SetContent(m.renderChatHistory())
 				m.chatViewport.GotoBottom()

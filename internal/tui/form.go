@@ -232,7 +232,7 @@ func (f FormModel) Update(msg tea.Msg, client *jira.Client) (FormModel, tea.Cmd)
 					f.chatHistory = append(f.chatHistory, chatEntry{role: "user", content: text})
 					f.claudeLoading = true
 					f.loadingStart = time.Now()
-					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+					ctx, cancel := context.WithTimeout(context.Background(), ClaudeFormTimeout)
 					f.cancelClaude = cancel
 					f.chatViewport.SetContent(f.renderChatHistory())
 					f.chatViewport.GotoBottom()
