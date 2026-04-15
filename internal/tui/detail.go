@@ -29,6 +29,11 @@ type DetailModel struct {
 	pickingWorkflow bool
 	workflows       []Workflow
 	workflowCursor  int
+
+	// Claude prompt state
+	promptingClaude  bool
+	claudePrompt     textarea.Model
+	selectedWorkflow string
 }
 
 func NewDetailModel() DetailModel {
@@ -41,10 +46,16 @@ func NewDetailModel() DetailModel {
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
 
+	cp := textarea.New()
+	cp.SetHeight(4)
+	cp.ShowLineNumbers = false
+	cp.CharLimit = 0
+
 	return DetailModel{
-		loading:     true,
-		spinner:     s,
-		commentArea: ta,
+		loading:      true,
+		spinner:      s,
+		commentArea:  ta,
+		claudePrompt: cp,
 	}
 }
 
@@ -53,6 +64,9 @@ func (d DetailModel) SetSize(width, height int) DetailModel {
 	d.height = height
 	if d.commenting {
 		d.viewport = viewport.New(width, height-5)
+	} else if d.promptingClaude {
+		d.viewport = viewport.New(width, height-7)
+		d.claudePrompt.SetWidth(width - 4)
 	} else {
 		d.viewport = viewport.New(width, height)
 	}
@@ -97,17 +111,73 @@ func (d DetailModel) Update(msg tea.Msg, client *jira.Client) (DetailModel, tea.
 				return d, nil
 			case "enter":
 				if d.issue != nil && d.workflowCursor < len(d.workflows) {
-					issueCopy := *d.issue
-					content := d.workflows[d.workflowCursor].Content
+					d.selectedWorkflow = d.workflows[d.workflowCursor].Content
 					d.pickingWorkflow = false
 					d.workflows = nil
-					return d, func() tea.Msg {
-						return launchClaudeTaskMsg{issue: &issueCopy, instruction: "", workflowContent: content}
+					d.promptingClaude = true
+					d.claudePrompt.SetWidth(d.width - 4)
+					d.claudePrompt.Placeholder = fmt.Sprintf("Additional instructions for %s (ctrl+s to submit, esc to cancel)", d.issue.Key)
+					d.claudePrompt.Reset()
+					d.viewport = viewport.New(d.width, d.height-7)
+					if d.issue != nil {
+						d.viewport.SetContent(d.renderContent())
 					}
+					return d, d.claudePrompt.Focus()
 				}
 				return d, nil
 			}
 			return d, nil
+		}
+
+		if d.promptingClaude {
+			switch msg.String() {
+			case "esc":
+				d.promptingClaude = false
+				d.selectedWorkflow = ""
+				d.claudePrompt.Blur()
+				d.claudePrompt.Reset()
+				d.viewport = viewport.New(d.width, d.height)
+				if d.issue != nil {
+					d.viewport.SetContent(d.renderContent())
+				}
+				return d, nil
+			case "ctrl+s":
+				instruction := strings.TrimSpace(d.claudePrompt.Value())
+				workflowContent := d.selectedWorkflow
+				d.promptingClaude = false
+				d.selectedWorkflow = ""
+				d.claudePrompt.Blur()
+				d.claudePrompt.Reset()
+				d.viewport = viewport.New(d.width, d.height)
+				if d.issue != nil {
+					issueCopy := *d.issue
+					d.viewport.SetContent(d.renderContent())
+					return d, func() tea.Msg {
+						return launchClaudeTaskMsg{issue: &issueCopy, instruction: instruction, workflowContent: workflowContent}
+					}
+				}
+				return d, nil
+			case "enter":
+				if strings.TrimSpace(d.claudePrompt.Value()) == "" {
+					workflowContent := d.selectedWorkflow
+					d.promptingClaude = false
+					d.selectedWorkflow = ""
+					d.claudePrompt.Blur()
+					d.claudePrompt.Reset()
+					d.viewport = viewport.New(d.width, d.height)
+					if d.issue != nil {
+						issueCopy := *d.issue
+						d.viewport.SetContent(d.renderContent())
+						return d, func() tea.Msg {
+							return launchClaudeTaskMsg{issue: &issueCopy, instruction: "", workflowContent: workflowContent}
+						}
+					}
+					return d, nil
+				}
+			}
+			var cmd tea.Cmd
+			d.claudePrompt, cmd = d.claudePrompt.Update(msg)
+			return d, cmd
 		}
 
 		if d.commenting {
@@ -179,14 +249,19 @@ func (d DetailModel) Update(msg tea.Msg, client *jira.Client) (DetailModel, tea.
 					d.workflowCursor = 0
 					return d, nil
 				}
-				issueCopy := *d.issue
-				var wfContent string
+				d.selectedWorkflow = ""
 				if len(workflows) == 1 {
-					wfContent = workflows[0].Content
+					d.selectedWorkflow = workflows[0].Content
 				}
-				return d, func() tea.Msg {
-					return launchClaudeTaskMsg{issue: &issueCopy, instruction: "", workflowContent: wfContent}
+				d.promptingClaude = true
+				d.claudePrompt.SetWidth(d.width - 4)
+				d.claudePrompt.Placeholder = fmt.Sprintf("Additional instructions for %s (ctrl+s to submit, esc to cancel)", d.issue.Key)
+				d.claudePrompt.Reset()
+				d.viewport = viewport.New(d.width, d.height-7)
+				if d.issue != nil {
+					d.viewport.SetContent(d.renderContent())
 				}
+				return d, d.claudePrompt.Focus()
 			}
 
 		case key.Matches(msg, detailKeys.Open):
@@ -241,6 +316,26 @@ func (d DetailModel) View() string {
 		content := lipgloss.JoinVertical(lipgloss.Left, title, "", items.String(), hint)
 		box := overlayStyle.Width(min(50, d.width-4)).Render(content)
 		return lipgloss.Place(d.width, d.height, lipgloss.Center, lipgloss.Center, box)
+	}
+
+	if d.promptingClaude {
+		issueKey := ""
+		if d.issue != nil {
+			issueKey = d.issue.Key
+		}
+		label := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).
+			Render(fmt.Sprintf("Claude task for %s:", issueKey))
+		taView := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(colorCyan).
+			Render(d.claudePrompt.View())
+		hint := dimStyle.Render("ctrl+s: submit  enter: skip  esc: cancel")
+		return lipgloss.JoinVertical(lipgloss.Left,
+			d.viewport.View(),
+			label,
+			taView,
+			hint,
+		)
 	}
 
 	if d.commenting {

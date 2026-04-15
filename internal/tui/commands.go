@@ -104,6 +104,10 @@ type workflowSavedMsg struct {
 	path string
 }
 
+type workflowMigratedMsg struct {
+	names []string
+}
+
 type formClaudeResponseMsg struct {
 	chatMessage string
 	fields      formClaudeFields

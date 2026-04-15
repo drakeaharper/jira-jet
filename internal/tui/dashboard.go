@@ -356,6 +356,22 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 						}
 					}
 					return d, nil
+				case "enter":
+					if strings.TrimSpace(d.claudePrompt.Value()) == "" {
+						workflowContent := d.selectedWorkflow
+						d.promptMode = promptNone
+						d.claudePrompt.Blur()
+						d.claudePrompt.Reset()
+						d.selectedWorkflow = ""
+						if d.pendingClaudeIssue != nil {
+							issue := d.pendingClaudeIssue
+							d.pendingClaudeIssue = nil
+							return d, func() tea.Msg {
+								return launchClaudeTaskMsg{issue: issue, instruction: "", workflowContent: workflowContent}
+							}
+						}
+						return d, nil
+					}
 				}
 				var cmd tea.Cmd
 				d.claudePrompt, cmd = d.claudePrompt.Update(msg)
@@ -586,7 +602,7 @@ func (d DashboardModel) View() string {
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(colorCyan).
 			Render(d.claudePrompt.View())
-		hint := dimStyle.Render("ctrl+s: submit  esc: cancel")
+		hint := dimStyle.Render("ctrl+s: submit  enter: skip  esc: cancel")
 		view = lipgloss.JoinVertical(lipgloss.Left, view, label, taView, hint)
 	} else if d.promptMode != promptNone {
 		var label string

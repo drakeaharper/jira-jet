@@ -68,7 +68,16 @@ func (a App) Init() tea.Cmd {
 	return tea.Batch(
 		a.dashboard.Init(),
 		fetchIssues(a.client, a.dashboard.jql, 50),
+		migrateWorkflowsCmd,
 	)
+}
+
+func migrateWorkflowsCmd() tea.Msg {
+	names, _ := MigrateLocalWorkflows()
+	if len(names) == 0 {
+		return nil
+	}
+	return workflowMigratedMsg{names: names}
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -264,6 +273,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.standup = a.standup.SetData(msg.completed, msg.wip)
 		return a, nil
 
+	case standupSummaryMsg:
+		a.standup = a.standup.SetSummary(msg.summary, msg.err)
+		return a, nil
+
 	case navigateToWorkflowEditorMsg:
 		a.viewStack = append(a.viewStack, a.activeView)
 		a.activeView = viewWorkflowEditor
@@ -276,6 +289,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.viewStack = a.viewStack[:len(a.viewStack)-1]
 		}
 		a.notification = fmt.Sprintf("Workflow saved to %s", msg.path)
+		cmds = append(cmds, clearNotificationAfter(NotifyMedium))
+		return a, tea.Batch(cmds...)
+
+	case workflowMigratedMsg:
+		a.notification = fmt.Sprintf("Migrated %d workflow(s) to ~/.jet/workflows/", len(msg.names))
 		cmds = append(cmds, clearNotificationAfter(NotifyMedium))
 		return a, tea.Batch(cmds...)
 
@@ -428,7 +446,7 @@ func (a App) helpBar() string {
 			bar = helpBarStyle.Render(" enter:send  tab:switch pane  ctrl+s:save  ctrl+u/ctrl+d:scroll  esc:back")
 		}
 	case viewStandup:
-		bar = helpBarStyle.Render(" j/k:navigate  enter:view issue  r:refresh  u:back")
+		bar = helpBarStyle.Render(" j/k:navigate  enter:view issue  s:summarize  r:refresh  u:back")
 	case viewTaskViewer:
 		switch a.taskViewer.mode {
 		case taskViewList:

@@ -1,7 +1,11 @@
 package tui
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -26,18 +30,31 @@ type standupRow struct {
 	issue *jira.Issue
 }
 
+// standupSummaryMsg carries the AI-generated standup summary.
+type standupSummaryMsg struct {
+	summary string
+	err     error
+}
+
+type standupSummaryOutput struct {
+	Summary string `json:"summary"`
+}
+
 // StandupModel displays a standup report with completed and in-progress tickets.
 type StandupModel struct {
-	rows         []standupRow
-	cursor       int
-	completed    []jira.Issue
-	wip          []jira.Issue
-	days         int
-	loading      bool
-	spinner      spinner.Model
-	width        int
-	height       int
-	scrollOffset int
+	rows           []standupRow
+	cursor         int
+	completed      []jira.Issue
+	wip            []jira.Issue
+	days           int
+	loading        bool
+	spinner        spinner.Model
+	width          int
+	height         int
+	scrollOffset   int
+	summary        string
+	summaryLoading bool
+	summaryErr     error
 }
 
 // NewStandupModel creates a new standup model.
@@ -71,6 +88,14 @@ func (m StandupModel) SetData(completed, wip []jira.Issue) StandupModel {
 	m.wip = wip
 	m.loading = false
 	m.buildRows()
+	return m
+}
+
+// SetSummary stores the AI-generated summary.
+func (m StandupModel) SetSummary(summary string, err error) StandupModel {
+	m.summaryLoading = false
+	m.summary = summary
+	m.summaryErr = err
 	return m
 }
 
@@ -213,6 +238,13 @@ func (m StandupModel) Update(msg tea.Msg, client *jira.Client) (StandupModel, te
 				issueKey := m.rows[m.cursor].issue.Key
 				return m, func() tea.Msg { return navigateToDetailMsg{key: issueKey} }
 			}
+		case msg.String() == "s":
+			if !m.summaryLoading && len(m.completed)+len(m.wip) > 0 {
+				m.summaryLoading = true
+				m.summary = ""
+				m.summaryErr = nil
+				return m, tea.Batch(m.spinner.Tick, generateStandupSummary(m.completed, m.wip, m.days))
+			}
 		case msg.String() == "r":
 			m.loading = true
 			return m, tea.Batch(m.spinner.Tick, fetchStandupData(client, m.days))
@@ -221,7 +253,7 @@ func (m StandupModel) Update(msg tea.Msg, client *jira.Client) (StandupModel, te
 		}
 
 	case spinner.TickMsg:
-		if m.loading {
+		if m.loading || m.summaryLoading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -247,9 +279,30 @@ func (m StandupModel) View() string {
 	b.WriteString(title + "\n")
 	b.WriteString(dimStyle.Render(strings.Repeat("━", min(m.width, 74))) + "\n")
 
+	// AI summary
+	headerLines := 3 // title + separator + buffer
+	if m.summaryLoading {
+		b.WriteString(m.spinner.View() + " Generating summary...\n")
+		headerLines++
+	} else if m.summaryErr != nil {
+		b.WriteString(errorStyle.Render("Summary: "+m.summaryErr.Error()) + "\n")
+		headerLines++
+	} else if m.summary != "" {
+		summaryStyle := lipgloss.NewStyle().Foreground(colorWhite).Italic(true)
+		maxW := min(m.width-2, 72)
+		wrapped := wrapText(m.summary, maxW)
+		lines := strings.Split(strings.TrimRight(wrapped, "\n"), "\n")
+		for _, line := range lines {
+			b.WriteString(summaryStyle.Render(line) + "\n")
+			headerLines++
+		}
+		b.WriteString("\n")
+		headerLines++
+	}
+
 	// Render rows, applying scroll offset
 	visualLine := 0
-	visible := m.height - 3 // title + separator + buffer
+	visible := m.height - headerLines
 
 	for i, row := range m.rows {
 		h := m.rowHeight(i)
@@ -358,4 +411,88 @@ func formatDate(dateStr string) string {
 		return dateStr
 	}
 	return t.Format("January 2, 2006")
+}
+
+// generateStandupSummary calls Claude to produce a brief AI summary of standup data.
+func generateStandupSummary(completed, wip []jira.Issue, days int) tea.Cmd {
+	completedCopy := make([]jira.Issue, len(completed))
+	copy(completedCopy, completed)
+	wipCopy := make([]jira.Issue, len(wip))
+	copy(wipCopy, wip)
+
+	return func() tea.Msg {
+		claudePath, err := findClaudeBinary()
+		if err != nil {
+			return standupSummaryMsg{err: fmt.Errorf("claude not found: %w", err)}
+		}
+
+		prompt := buildStandupSummaryPrompt(completedCopy, wipCopy, days)
+		schema := `{"type":"object","properties":{"summary":{"type":"string","description":"A brief 2-3 sentence standup summary"}},"required":["summary"]}`
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		var stdout, stderr bytes.Buffer
+		cmd := exec.CommandContext(ctx, claudePath,
+			"-p",
+			"--output-format", "json",
+			"--json-schema", schema,
+			"--max-turns", "5",
+		)
+		cmd.Stdin = strings.NewReader(prompt)
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return standupSummaryMsg{err: fmt.Errorf("timed out")}
+			}
+			errOutput := strings.TrimSpace(stderr.String())
+			if errOutput != "" {
+				return standupSummaryMsg{err: fmt.Errorf("claude: %s", errOutput)}
+			}
+			return standupSummaryMsg{err: fmt.Errorf("claude failed: %w", err)}
+		}
+
+		var resp claudeResponse
+		if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
+			return standupSummaryMsg{err: fmt.Errorf("failed to parse response: %w", err)}
+		}
+
+		if resp.IsError {
+			return standupSummaryMsg{err: fmt.Errorf("API error: %s", resp.Result)}
+		}
+
+		var out standupSummaryOutput
+		if err := json.Unmarshal(resp.StructuredOutput, &out); err != nil {
+			// Fall back to raw result text
+			return standupSummaryMsg{summary: resp.Result}
+		}
+
+		return standupSummaryMsg{summary: out.Summary}
+	}
+}
+
+func buildStandupSummaryPrompt(completed, wip []jira.Issue, days int) string {
+	var b strings.Builder
+	b.WriteString("Generate a brief, natural-language standup summary (2-3 sentences) from the following ticket data. ")
+	b.WriteString("Focus on themes and progress rather than listing every ticket key. Be concise and conversational.\n\n")
+
+	b.WriteString(fmt.Sprintf("## Completed (last %d days)\n", days))
+	if len(completed) == 0 {
+		b.WriteString("None\n")
+	}
+	for _, issue := range completed {
+		b.WriteString(fmt.Sprintf("- %s: %s [%s]\n", issue.Key, issue.Fields.Summary, issue.Fields.IssueType.Name))
+	}
+
+	b.WriteString(fmt.Sprintf("\n## In Progress (%d)\n", len(wip)))
+	if len(wip) == 0 {
+		b.WriteString("None\n")
+	}
+	for _, issue := range wip {
+		b.WriteString(fmt.Sprintf("- %s: %s [%s]\n", issue.Key, issue.Fields.Summary, issue.Fields.IssueType.Name))
+	}
+
+	return b.String()
 }

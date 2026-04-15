@@ -20,19 +20,29 @@ import (
 )
 
 const stateFile = ".jet/tasks/state.json"
-const workflowDir = ".jet/workflows"
 
-// Workflow represents a discovered workflow file from .jet/workflows/.
+// GlobalWorkflowDir returns the global workflow directory (~/.jet/workflows/).
+// Falls back to local .jet/workflows if the home directory cannot be resolved.
+func GlobalWorkflowDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".jet/workflows"
+	}
+	return filepath.Join(home, ".jet", "workflows")
+}
+
+// Workflow represents a discovered workflow file from ~/.jet/workflows/.
 type Workflow struct {
 	Name    string // filename without .md extension
 	Path    string // full path to the .md file
 	Content string // raw file content
 }
 
-// DiscoverWorkflows finds all .md workflow files in .jet/workflows/.
+// DiscoverWorkflows finds all .md workflow files in ~/.jet/workflows/.
 // Returns an empty slice (not error) if the directory does not exist.
 func DiscoverWorkflows() ([]Workflow, error) {
-	entries, err := os.ReadDir(workflowDir)
+	dir := GlobalWorkflowDir()
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -45,7 +55,7 @@ func DiscoverWorkflows() ([]Workflow, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		path := filepath.Join(workflowDir, e.Name())
+		path := filepath.Join(dir, e.Name())
 		content, err := os.ReadFile(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not read workflow file %s: %v\n", path, err)
@@ -64,6 +74,47 @@ func DiscoverWorkflows() ([]Workflow, error) {
 	})
 
 	return workflows, nil
+}
+
+// MigrateLocalWorkflows copies workflow files from local .jet/workflows/ to the
+// global ~/.jet/workflows/ directory. Existing global files are not overwritten.
+// Returns the names of successfully migrated workflows.
+func MigrateLocalWorkflows() ([]string, error) {
+	const localDir = ".jet/workflows"
+	entries, err := os.ReadDir(localDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	globalDir := GlobalWorkflowDir()
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		return nil, err
+	}
+
+	var migrated []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		dest := filepath.Join(globalDir, e.Name())
+		if _, err := os.Stat(dest); err == nil {
+			continue // global file already exists, skip
+		}
+		src := filepath.Join(localDir, e.Name())
+		data, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(dest, data, 0644); err != nil {
+			continue
+		}
+		migrated = append(migrated, strings.TrimSuffix(e.Name(), ".md"))
+	}
+
+	return migrated, nil
 }
 
 // TaskStatus represents the lifecycle state of a background task.

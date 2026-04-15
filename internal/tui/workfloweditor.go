@@ -724,7 +724,7 @@ func buildWorkflowEditorPrompt(history []chatEntry, currentWorkflow, workDir, in
 	var b strings.Builder
 
 	b.WriteString("You are a workflow editor assistant for jira-jet. Your job is to help the user ")
-	b.WriteString("create a .jet/workflows/*.md file that will serve as instructions for Claude ")
+	b.WriteString("create a ~/.jet/workflows/*.md file that will serve as instructions for Claude ")
 	b.WriteString("when working on Jira tickets in this repository.\n\n")
 	b.WriteString("The workflow file you produce will be used as the ENTIRE instructions section of a prompt. ")
 	b.WriteString("Ticket context (summary, description, comments, etc.) will be auto-appended separately, ")
@@ -815,7 +815,7 @@ func callClaudeForWorkflow(ctx context.Context, claudePath, workDir, prompt stri
 	}
 }
 
-// saveWorkflowFile writes the workflow content to .jet/workflows/{name}.md.
+// saveWorkflowFile writes the workflow content to ~/.jet/workflows/{name}.md.
 func saveWorkflowFile(name, content string) tea.Cmd {
 	return func() tea.Msg {
 		// Sanitize filename
@@ -833,7 +833,7 @@ func saveWorkflowFile(name, content string) tea.Cmd {
 			name = "my-workflow"
 		}
 
-		dir := filepath.Join(".jet", "workflows")
+		dir := GlobalWorkflowDir()
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return errMsg{err: fmt.Errorf("failed to create workflows directory: %w", err)}
 		}
