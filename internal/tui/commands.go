@@ -83,6 +83,7 @@ type cancelClaudeTaskMsg struct {
 
 type navigateToTaskViewerMsg struct{}
 type navigateToWorkflowEditorMsg struct{}
+type navigateToStandupMsg struct{ days int }
 
 type workflowEditorResponseMsg struct {
 	chatMessage     string
@@ -112,6 +113,11 @@ type projectEpicsLoadedMsg struct {
 	issues     []jira.Issue
 	projectKey string
 	total      int
+}
+
+type standupDataLoadedMsg struct {
+	completed []jira.Issue
+	wip       []jira.Issue
 }
 
 type clearErrMsg struct{}
@@ -268,6 +274,32 @@ func fetchProjectEpics(client *jira.Client, projectKey string) tea.Cmd {
 			return errMsg{err: err}
 		}
 		return projectEpicsLoadedMsg{issues: resp.Issues, projectKey: projectKey, total: resp.Total}
+	}
+}
+
+// fetchStandupData runs both completed and WIP queries for the standup view.
+func fetchStandupData(client *jira.Client, days int) tea.Cmd {
+	return func() tea.Msg {
+		completedJQL := fmt.Sprintf(
+			`assignee = currentUser() AND statusCategory = "Done" AND resolved >= -%dd ORDER BY resolved DESC`,
+			days,
+		)
+		wipJQL := `assignee = currentUser() AND statusCategory = "In Progress" ORDER BY updated DESC`
+
+		completedResp, err := client.SearchIssues(completedJQL, 50)
+		if err != nil {
+			return errMsg{err: fmt.Errorf("standup completed query failed: %w", err)}
+		}
+
+		wipResp, err := client.SearchIssues(wipJQL, 50)
+		if err != nil {
+			return errMsg{err: fmt.Errorf("standup WIP query failed: %w", err)}
+		}
+
+		return standupDataLoadedMsg{
+			completed: completedResp.Issues,
+			wip:       wipResp.Issues,
+		}
 	}
 }
 

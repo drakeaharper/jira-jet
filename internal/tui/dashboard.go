@@ -452,6 +452,9 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 				return d, nil
 			}
 
+		case key.Matches(msg, dashboardKeys.Standup):
+			return d, func() tea.Msg { return navigateToStandupMsg{days: 2} }
+
 		case key.Matches(msg, dashboardKeys.Claude):
 			if issue := d.selectedIssue(); issue != nil {
 				issueCopy := *issue

@@ -41,6 +41,7 @@ type Fields struct {
 	FixVersions        []Version       `json:"fixVersions"`
 	Created            string          `json:"created"`
 	Updated            string          `json:"updated"`
+	ResolutionDate     string          `json:"resolutiondate"`
 	Comment            CommentList     `json:"comment"`
 	Attachment         []Attachment    `json:"attachment"`
 	Parent             *IssueLink      `json:"parent"`
@@ -291,7 +292,7 @@ func checkResponse(resp *http.Response, successCode int, resource string) error 
 func (c *Client) GetIssue(issueKey string) (*Issue, error) {
 	params := url.Values{}
 	params.Add("expand", "changelog,renderedFields")
-	params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,issuetype,project,comment,attachment,parent,customfield_10014,issuelinks")
+	params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,resolutiondate,issuetype,project,comment,attachment,parent,customfield_10014,issuelinks")
 
 	endpoint := fmt.Sprintf("/rest/api/2/issue/%s?%s", issueKey, params.Encode())
 
@@ -438,7 +439,7 @@ func (c *Client) SearchIssuesWithPagination(jql string, startAt int, maxResults 
 	params.Add("jql", jql)
 	params.Add("startAt", fmt.Sprintf("%d", startAt))
 	params.Add("maxResults", fmt.Sprintf("%d", maxResults))
-	params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,issuetype,project,parent,customfield_10014")
+	params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,resolutiondate,issuetype,project,parent,customfield_10014")
 
 	endpoint := fmt.Sprintf("/rest/api/3/search/jql?%s", params.Encode())
 
@@ -497,7 +498,7 @@ func (c *Client) GetEpicChildren(epicKey string) ([]Issue, error) {
 		params := url.Values{}
 		params.Add("startAt", fmt.Sprintf("%d", startAt))
 		params.Add("maxResults", fmt.Sprintf("%d", maxResults))
-		params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,issuetype,project,parent,customfield_10014")
+		params.Add("fields", "summary,description,status,assignee,reporter,priority,labels,components,fixVersions,created,updated,resolutiondate,issuetype,project,parent,customfield_10014")
 
 		endpoint := fmt.Sprintf("/rest/agile/1.0/epic/%s/issue?%s", epicKey, params.Encode())
 

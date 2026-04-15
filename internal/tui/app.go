@@ -17,6 +17,7 @@ const (
 	viewTransition
 	viewTaskViewer
 	viewWorkflowEditor
+	viewStandup
 )
 
 // App is the top-level Bubble Tea model.
@@ -34,6 +35,7 @@ type App struct {
 	transition TransitionModel
 	taskViewer     TaskViewerModel
 	workflowEditor WorkflowEditorModel
+	standup        StandupModel
 
 	taskManager  *TaskManager
 	notification string
@@ -91,6 +93,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.taskViewer = a.taskViewer.SetSize(a.width, contentHeight)
 		case viewWorkflowEditor:
 			a.workflowEditor = a.workflowEditor.SetSize(a.width, contentHeight)
+		case viewStandup:
+			a.standup = a.standup.SetSize(a.width, contentHeight)
 		}
 		return a, nil
 
@@ -249,6 +253,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.taskViewer = NewTaskViewerModel(a.taskManager, a.width, a.height-2)
 		return a, nil
 
+	case navigateToStandupMsg:
+		a.viewStack = append(a.viewStack, a.activeView)
+		a.activeView = viewStandup
+		a.standup = NewStandupModel(msg.days)
+		a.standup = a.standup.SetSize(a.width, a.height-2)
+		return a, tea.Batch(a.standup.Init(), fetchStandupData(a.client, msg.days))
+
+	case standupDataLoadedMsg:
+		a.standup = a.standup.SetData(msg.completed, msg.wip)
+		return a, nil
+
 	case navigateToWorkflowEditorMsg:
 		a.viewStack = append(a.viewStack, a.activeView)
 		a.activeView = viewWorkflowEditor
@@ -296,6 +311,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewWorkflowEditor:
 		a.workflowEditor, cmd = a.workflowEditor.Update(msg)
 		cmds = append(cmds, cmd)
+	case viewStandup:
+		a.standup, cmd = a.standup.Update(msg, a.client)
+		cmds = append(cmds, cmd)
 	}
 
 	return a, tea.Batch(cmds...)
@@ -314,6 +332,8 @@ func (a App) View() string {
 		content = a.taskViewer.View()
 	case viewWorkflowEditor:
 		content = a.workflowEditor.View()
+	case viewStandup:
+		content = a.standup.View()
 	case viewTransition:
 		// Render transition overlay on top of the previous view
 		var bg string
@@ -376,7 +396,7 @@ func (a App) helpBar() string {
 		if a.dashboard.promptMode != promptNone {
 			return prefix + helpBarStyle.Render(" enter:confirm  esc:cancel")
 		}
-		base := " enter:view  o:open  x:epic  E:epics  C:claude  T:tasks  W:workflow  c:create  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
+		base := " enter:view  o:open  x:epic  E:epics  S:standup  C:claude  T:tasks  W:workflow  c:create  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
 		if a.dashboard.viewingProjectEpics != "" {
 			base = " enter:view  m:my tickets  a:show/hide closed  x:epic  o:open  e:edit  t:transition  r:refresh  q:quit"
 		} else if a.dashboard.viewingEpic != "" {
@@ -407,6 +427,8 @@ func (a App) helpBar() string {
 		} else {
 			bar = helpBarStyle.Render(" enter:send  tab:switch pane  ctrl+s:save  ctrl+u/ctrl+d:scroll  esc:back")
 		}
+	case viewStandup:
+		bar = helpBarStyle.Render(" j/k:navigate  enter:view issue  r:refresh  u:back")
 	case viewTaskViewer:
 		switch a.taskViewer.mode {
 		case taskViewList:
