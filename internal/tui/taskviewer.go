@@ -43,6 +43,9 @@ type TaskViewerModel struct {
 	width        int
 	height       int
 
+	// Live log auto-refresh state
+	logFollowing bool // true when auto-scrolling to bottom
+
 	// File browser state
 	files         []fileEntry
 	fileSelected  int
@@ -109,17 +112,27 @@ func (tv TaskViewerModel) Update(msg tea.Msg) (TaskViewerModel, tea.Cmd) {
 				return tv, nil
 			case msg.String() == "j" || msg.String() == "down":
 				tv.viewport.LineDown(1)
+				if tv.mode == taskViewLogs {
+					tv.logFollowing = tv.viewport.AtBottom()
+				}
 				return tv, nil
 			case msg.String() == "k" || msg.String() == "up":
 				tv.viewport.LineUp(1)
+				if tv.mode == taskViewLogs {
+					tv.logFollowing = false
+				}
 				return tv, nil
 			case msg.String() == "r" && tv.mode == taskViewLogs:
 				tv.viewport.SetContent(tv.liveLogsContent())
 				tv.viewport.GotoBottom()
+				tv.logFollowing = true
 				return tv, nil
 			}
 			var cmd tea.Cmd
 			tv.viewport, cmd = tv.viewport.Update(msg)
+			if tv.mode == taskViewLogs {
+				tv.logFollowing = tv.viewport.AtBottom()
+			}
 			return tv, cmd
 		}
 
@@ -201,20 +214,22 @@ func (tv TaskViewerModel) Update(msg tea.Msg) (TaskViewerModel, tea.Cmd) {
 				if task.Status == TaskRunning {
 					tv.prevListMode = taskViewList
 					tv.mode = taskViewLogs
+					tv.logFollowing = true
 					tv.viewport = viewport.New(tv.width, tv.height)
 					tv.viewport.SetContent(tv.liveLogsContent())
 					tv.viewport.GotoBottom()
-					return tv, nil
+					return tv, tv.startLogTickIfRunning()
 				}
 			}
 		case msg.String() == "l":
 			if tv.selected < len(tv.tasks) {
 				tv.prevListMode = taskViewList
 				tv.mode = taskViewLogs
+				tv.logFollowing = true
 				tv.viewport = viewport.New(tv.width, tv.height)
 				tv.viewport.SetContent(tv.liveLogsContent())
 				tv.viewport.GotoBottom()
-				return tv, nil
+				return tv, tv.startLogTickIfRunning()
 			}
 		case msg.String() == "K":
 			if tv.selected < len(tv.tasks) {
@@ -255,6 +270,33 @@ func (tv TaskViewerModel) Update(msg tea.Msg) (TaskViewerModel, tea.Cmd) {
 	case claudeTaskDoneMsg:
 		tv.tasks = tv.taskManager.Tasks()
 		tv.files = discoverOutputFiles()
+		// If viewing logs, do a final content refresh
+		if tv.mode == taskViewLogs {
+			tv.viewport.SetContent(tv.liveLogsContent())
+			if tv.logFollowing {
+				tv.viewport.GotoBottom()
+			}
+		}
+		return tv, nil
+
+	case taskLogTickMsg:
+		if tv.mode != taskViewLogs {
+			return tv, nil
+		}
+		if tv.selected >= len(tv.tasks) {
+			return tv, nil
+		}
+		task := tv.tasks[tv.selected]
+
+		wasAtBottom := tv.viewport.AtBottom()
+		tv.viewport.SetContent(tv.liveLogsContent())
+		if tv.logFollowing && wasAtBottom {
+			tv.viewport.GotoBottom()
+		}
+
+		if task.Status == TaskRunning {
+			return tv, taskLogTick()
+		}
 		return tv, nil
 	}
 
@@ -280,6 +322,17 @@ func (tv TaskViewerModel) fileContent(path string) string {
 	return string(data)
 }
 
+// startLogTickIfRunning returns a tick command only if the selected task is running.
+func (tv TaskViewerModel) startLogTickIfRunning() tea.Cmd {
+	if tv.selected >= len(tv.tasks) {
+		return nil
+	}
+	if tv.tasks[tv.selected].Status == TaskRunning {
+		return taskLogTick()
+	}
+	return nil
+}
+
 func (tv TaskViewerModel) liveLogsContent() string {
 	if tv.selected >= len(tv.tasks) {
 		return ""
@@ -291,6 +344,13 @@ func (tv TaskViewerModel) liveLogsContent() string {
 	b.WriteString(dimStyle.Render(fmt.Sprintf("  Status: %s  Elapsed: %s",
 		taskStatusString(task.Status),
 		task.Elapsed().Round(time.Second))) + "\n")
+	if task.Status == TaskRunning {
+		if tv.logFollowing {
+			b.WriteString(dimStyle.Render("  [auto-refreshing - following]") + "\n")
+		} else {
+			b.WriteString(dimStyle.Render("  [auto-refreshing - scrolled, r to follow]") + "\n")
+		}
+	}
 	b.WriteString(dimStyle.Render(strings.Repeat("─", min(tv.width, 60))) + "\n\n")
 
 	stderr := task.StderrSnapshot()

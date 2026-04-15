@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -418,7 +419,7 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, w
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	var stderrBuf bytes.Buffer
+	var logBuf bytes.Buffer
 	task := &Task{
 		IssueKey:  issue.Key,
 		Summary:   issue.Fields.Summary,
@@ -426,7 +427,7 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, w
 		StartedAt: time.Now(),
 		Branch:    branchName,
 		cancel:    cancel,
-		stderr:    &stderrBuf,
+		stderr:    &logBuf,
 	}
 
 	tm.mu.Lock()
@@ -445,16 +446,28 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, w
 	schema := `{"type":"object","properties":{"plan":{"type":"string","description":"A concise description of what you did"},"steps":{"type":"array","items":{"type":"string"},"description":"Steps you took"},"conclusion":{"type":"string","description":"Summary of what was done and any remaining items"},"files_changed":{"type":"array","items":{"type":"string"},"description":"File paths that were modified"},"pr_url":{"type":"string","description":"URL of the created pull request, empty if not created"},"repo":{"type":"string","description":"Path of the repo you worked in"},"worktree_path":{"type":"string","description":"Path of the worktree you created, empty if not applicable"}},"required":["plan","steps","conclusion","files_changed","pr_url","repo","worktree_path"]}`
 
 	go func() {
-		var stdoutBuf bytes.Buffer
 		cmd := exec.CommandContext(ctx, claudePath,
 			"-p",
-			"--output-format", "json",
+			"--verbose",
+			"--output-format", "stream-json",
 			"--json-schema", schema,
 			"--permission-mode", "bypassPermissions",
 		)
 		cmd.Stdin = strings.NewReader(prompt)
 		cmd.Dir = workDir
-		cmd.Stdout = &stdoutBuf
+
+		stdoutPipe, err := cmd.StdoutPipe()
+		if err != nil {
+			task.Status = TaskFailed
+			task.Error = fmt.Errorf("failed to create stdout pipe: %w", err)
+			tm.saveState()
+			if program != nil {
+				program.Send(claudeTaskDoneMsg{issueKey: task.IssueKey, task: task, err: task.Error})
+			}
+			return
+		}
+
+		var stderrBuf bytes.Buffer
 		cmd.Stderr = &stderrBuf
 
 		if err := cmd.Start(); err != nil {
@@ -471,8 +484,32 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, w
 		task.PID = cmd.Process.Pid
 		tm.saveState()
 
-		err := cmd.Wait()
-		output := stdoutBuf.Bytes()
+		// Read streaming JSON events from stdout
+		var lastResultLine []byte
+		scanner := bufio.NewScanner(stdoutPipe)
+		scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // up to 10MB per line
+		for scanner.Scan() {
+			line := scanner.Bytes()
+
+			// Format event for live log display
+			formatted := formatStreamEvent(line)
+			if formatted != "" {
+				task.mu.Lock()
+				task.stderr.WriteString(formatted)
+				task.mu.Unlock()
+			}
+
+			// Capture the result event for parsing later
+			var peek struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(line, &peek) == nil && peek.Type == "result" {
+				lastResultLine = make([]byte, len(line))
+				copy(lastResultLine, line)
+			}
+		}
+
+		err = cmd.Wait()
 
 		task.EndedAt = time.Now()
 		task.Duration = task.EndedAt.Sub(task.StartedAt)
@@ -484,7 +521,7 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, w
 			} else {
 				task.Error = fmt.Errorf("claude exited with error: %w", err)
 			}
-			writeRawTaskFile(task, string(output))
+			writeRawTaskFile(task, stderrBuf.String())
 			tm.saveState()
 			if program != nil {
 				program.Send(claudeTaskDoneMsg{issueKey: task.IssueKey, task: task, err: task.Error})
@@ -492,12 +529,23 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, w
 			return
 		}
 
-		// Parse the claude response envelope
-		var resp claudeResponse
-		if err := json.Unmarshal(output, &resp); err != nil {
+		if lastResultLine == nil {
 			task.Status = TaskFailed
-			task.Error = fmt.Errorf("failed to parse claude output: %w", err)
-			writeRawTaskFile(task, string(output))
+			task.Error = fmt.Errorf("no result event in stream output")
+			writeRawTaskFile(task, stderrBuf.String())
+			tm.saveState()
+			if program != nil {
+				program.Send(claudeTaskDoneMsg{issueKey: task.IssueKey, task: task, err: task.Error})
+			}
+			return
+		}
+
+		// Parse the result event (same structure as non-streaming envelope)
+		var resp claudeResponse
+		if err := json.Unmarshal(lastResultLine, &resp); err != nil {
+			task.Status = TaskFailed
+			task.Error = fmt.Errorf("failed to parse claude result: %w", err)
+			writeRawTaskFile(task, string(lastResultLine))
 			tm.saveState()
 			if program != nil {
 				program.Send(claudeTaskDoneMsg{issueKey: task.IssueKey, task: task, err: task.Error})
@@ -511,7 +559,7 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, w
 		if resp.IsError {
 			task.Status = TaskFailed
 			task.Error = fmt.Errorf("API error: %s", resp.Result)
-			writeRawTaskFile(task, string(output))
+			writeRawTaskFile(task, string(lastResultLine))
 			tm.saveState()
 			if program != nil {
 				program.Send(claudeTaskDoneMsg{issueKey: task.IssueKey, task: task, err: task.Error})
@@ -723,4 +771,90 @@ func writeRawTaskFile(task *Task, raw string) {
 
 	content := fmt.Sprintf("# %s — Claude Task (Raw Output)\n\n**Warning:** Structured output parsing failed.\n\n```\n%s\n```\n", task.IssueKey, raw)
 	os.WriteFile(task.OutputFile, []byte(content), 0644)
+}
+
+// streamContentBlock represents a content block in a streaming assistant message.
+type streamContentBlock struct {
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+}
+
+// formatStreamEvent converts a stream-json line into a human-readable log entry.
+func formatStreamEvent(line []byte) string {
+	var event struct {
+		Type    string `json:"type"`
+		Subtype string `json:"subtype,omitempty"`
+		Message struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message,omitempty"`
+	}
+	if json.Unmarshal(line, &event) != nil {
+		return ""
+	}
+
+	switch event.Type {
+	case "system":
+		if event.Subtype == "init" {
+			return "  Session started\n"
+		}
+	case "assistant":
+		var blocks []streamContentBlock
+		if json.Unmarshal(event.Message.Content, &blocks) != nil {
+			return ""
+		}
+		var b strings.Builder
+		for _, block := range blocks {
+			switch block.Type {
+			case "text":
+				text := strings.TrimSpace(block.Text)
+				if text == "" {
+					continue
+				}
+				lines := strings.SplitN(text, "\n", 4)
+				if len(lines) > 3 {
+					lines = append(lines[:3], "...")
+				}
+				for _, l := range lines {
+					if len(l) > 120 {
+						l = l[:120] + "..."
+					}
+					b.WriteString("  " + l + "\n")
+				}
+			case "tool_use":
+				b.WriteString(fmt.Sprintf("  ► %s\n", formatToolSummary(block.Name, block.Input)))
+			}
+		}
+		return b.String()
+	case "result":
+		return ""
+	}
+	return ""
+}
+
+// formatToolSummary returns a concise description of a tool invocation.
+func formatToolSummary(name string, rawInput json.RawMessage) string {
+	var input map[string]interface{}
+	if json.Unmarshal(rawInput, &input) != nil {
+		return name
+	}
+
+	if fp, ok := input["file_path"].(string); ok {
+		return fmt.Sprintf("%s %s", name, fp)
+	}
+	if cmd, ok := input["command"].(string); ok {
+		cmd = strings.SplitN(cmd, "\n", 2)[0]
+		if len(cmd) > 80 {
+			cmd = cmd[:80] + "..."
+		}
+		return fmt.Sprintf("%s: %s", name, cmd)
+	}
+	if p, ok := input["pattern"].(string); ok {
+		return fmt.Sprintf("%s %s", name, p)
+	}
+	if p, ok := input["path"].(string); ok {
+		return fmt.Sprintf("%s %s", name, p)
+	}
+	return name
 }

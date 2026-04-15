@@ -81,6 +81,15 @@ type cancelClaudeTaskMsg struct {
 	issueKey string
 }
 
+// taskLogTickMsg is sent periodically to refresh the live logs viewport.
+type taskLogTickMsg struct{}
+
+func taskLogTick() tea.Cmd {
+	return tea.Tick(750*time.Millisecond, func(time.Time) tea.Msg {
+		return taskLogTickMsg{}
+	})
+}
+
 type navigateToTaskViewerMsg struct{}
 type navigateToWorkflowEditorMsg struct{}
 type navigateToStandupMsg struct{ days int }

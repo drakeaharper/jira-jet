@@ -231,7 +231,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.notification = fmt.Sprintf("[%s] Claude task completed ($%.4f)", msg.issueKey, msg.task.Cost)
 			cmds = append(cmds, clearNotificationAfter(NotifyXLong))
 		}
-		return a, tea.Batch(cmds...)
+		// Fall through to delegate so task viewer gets this message too
 
 	case cancelClaudeTaskMsg:
 		if a.taskManager.KillTask(msg.issueKey) {
@@ -436,7 +436,7 @@ func (a App) helpBar() string {
 		case taskViewFiles:
 			bar = helpBarStyle.Render(" j/k:navigate  enter:view  x:delete file  X:delete all  r:refresh  u:back")
 		case taskViewLogs:
-			bar = helpBarStyle.Render(" j/k:scroll  r:refresh logs  u:back")
+			bar = helpBarStyle.Render(" j/k:scroll  r:refresh & follow  u:back  (auto-refreshing)")
 		default:
 			bar = helpBarStyle.Render(" j/k:scroll  u:back")
 		}
