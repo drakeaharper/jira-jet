@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -100,8 +99,6 @@ const (
 	promptOpenTicket
 	promptEpic
 	promptEpics
-	promptClaude
-	promptWorkflowPicker
 )
 
 // DashboardModel is the model for the dashboard view.
@@ -112,13 +109,15 @@ type DashboardModel struct {
 	loading    bool
 	spinner    spinner.Model
 	total      int
+	width      int
 
 	// Prompt input for open/epic (single-line)
-	prompt textinput.Model
-	// Prompt for claude instructions (multi-line)
-	claudePrompt       textarea.Model
-	promptMode         promptMode
-	pendingClaudeIssue *jira.Issue // captured when C is pressed, used on ctrl+s
+	prompt     textinput.Model
+	promptMode promptMode
+
+	// Shared workflow + instruction picker for Claude task launches.
+	picker             ClaudePicker
+	pendingClaudeIssue *jira.Issue
 
 	// Epic viewing state
 	viewingEpic  string // non-empty when viewing an epic's children
@@ -129,11 +128,12 @@ type DashboardModel struct {
 	viewingProjectEpics string       // non-empty when viewing project epics
 	allProjectEpics     []jira.Issue // unfiltered project epics for toggle
 	projectEpicsShowAll bool         // when true, show closed epics
+}
 
-	// Workflow picker state
-	workflows        []Workflow
-	workflowCursor   int
-	selectedWorkflow string // content of chosen workflow, carried into launch msg
+// AnyPromptActive reports whether any input mode (single-line prompt or
+// Claude picker) is capturing input.
+func (d DashboardModel) AnyPromptActive() bool {
+	return d.promptMode != promptNone || d.picker.Active()
 }
 
 // NewDashboardModel creates a new dashboard model.
@@ -153,19 +153,14 @@ func NewDashboardModel(jql string) DashboardModel {
 	ti := textinput.New()
 	ti.CharLimit = 128
 
-	ta := textarea.New()
-	ta.SetHeight(4)
-	ta.ShowLineNumbers = false
-	ta.CharLimit = 0 // no limit
-
 	return DashboardModel{
-		list:         l,
-		jql:          jql,
-		currentJQL:   jql,
-		loading:      true,
-		spinner:      s,
-		prompt:       ti,
-		claudePrompt: ta,
+		list:       l,
+		jql:        jql,
+		currentJQL: jql,
+		loading:    true,
+		spinner:    s,
+		prompt:     ti,
+		picker:     NewClaudePicker(),
 	}
 }
 
@@ -174,17 +169,15 @@ func (d DashboardModel) Init() tea.Cmd {
 }
 
 func (d DashboardModel) SetSize(width, height int) DashboardModel {
+	d.width = width
 	h := height
-	if d.promptMode == promptWorkflowPicker {
-		pickerHeight := len(d.workflows) + 3 // items + label + hint + padding
-		h -= pickerHeight
-	} else if d.promptMode == promptClaude {
-		h -= 6 // reserve space for textarea + label
+	if d.picker.Active() {
+		h -= d.picker.Height()
 	} else if d.promptMode != promptNone {
 		h -= 2 // reserve space for single-line prompt
 	}
 	d.list.SetSize(width, h)
-	d.claudePrompt.SetWidth(width - 2)
+	d.picker = d.picker.SetWidth(width)
 	return d
 }
 
@@ -295,89 +288,31 @@ func (d DashboardModel) selectedIssue() *jira.Issue {
 func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// Picker takes priority over all other input when active.
+	if d.picker.Active() {
+		var cmd tea.Cmd
+		d.picker, cmd = d.picker.Update(msg)
+		return d, cmd
+	}
+
 	switch msg := msg.(type) {
+	case claudePickerResultMsg:
+		issue := d.pendingClaudeIssue
+		d.pendingClaudeIssue = nil
+		if msg.cancelled || issue == nil {
+			return d, nil
+		}
+		return d, func() tea.Msg {
+			return launchClaudeTaskMsg{
+				issue:           issue,
+				instruction:     msg.instruction,
+				workflowContent: msg.workflowContent,
+			}
+		}
+
 	case tea.KeyMsg:
 		// Handle prompt input mode
 		if d.promptMode != promptNone {
-			// Workflow picker handling
-			if d.promptMode == promptWorkflowPicker {
-				switch msg.String() {
-				case "esc":
-					d.promptMode = promptNone
-					d.pendingClaudeIssue = nil
-					d.workflows = nil
-					return d, nil
-				case "j", "down":
-					if d.workflowCursor < len(d.workflows)-1 {
-						d.workflowCursor++
-					}
-					return d, nil
-				case "k", "up":
-					if d.workflowCursor > 0 {
-						d.workflowCursor--
-					}
-					return d, nil
-				case "enter":
-					d.selectedWorkflow = d.workflows[d.workflowCursor].Content
-					d.workflows = nil
-					d.promptMode = promptClaude
-					d.claudePrompt.SetWidth(d.list.Width() - 2)
-					if d.pendingClaudeIssue != nil {
-						d.claudePrompt.Placeholder = fmt.Sprintf("Additional instructions for %s (ctrl+s to submit, esc to cancel)", d.pendingClaudeIssue.Key)
-					}
-					d.claudePrompt.Reset()
-					return d, d.claudePrompt.Focus()
-				}
-				return d, nil
-			}
-
-			// Claude prompt uses textarea — separate handling
-			if d.promptMode == promptClaude {
-				switch msg.String() {
-				case "esc":
-					d.promptMode = promptNone
-					d.pendingClaudeIssue = nil
-					d.selectedWorkflow = ""
-					d.claudePrompt.Blur()
-					d.claudePrompt.Reset()
-					return d, nil
-				case "ctrl+s":
-					instruction := strings.TrimSpace(d.claudePrompt.Value())
-					workflowContent := d.selectedWorkflow
-					d.promptMode = promptNone
-					d.claudePrompt.Blur()
-					d.claudePrompt.Reset()
-					d.selectedWorkflow = ""
-					if d.pendingClaudeIssue != nil {
-						issue := d.pendingClaudeIssue
-						d.pendingClaudeIssue = nil
-						return d, func() tea.Msg {
-							return launchClaudeTaskMsg{issue: issue, instruction: instruction, workflowContent: workflowContent}
-						}
-					}
-					return d, nil
-				case "enter":
-					if strings.TrimSpace(d.claudePrompt.Value()) == "" {
-						workflowContent := d.selectedWorkflow
-						d.promptMode = promptNone
-						d.claudePrompt.Blur()
-						d.claudePrompt.Reset()
-						d.selectedWorkflow = ""
-						if d.pendingClaudeIssue != nil {
-							issue := d.pendingClaudeIssue
-							d.pendingClaudeIssue = nil
-							return d, func() tea.Msg {
-								return launchClaudeTaskMsg{issue: issue, instruction: "", workflowContent: workflowContent}
-							}
-						}
-						return d, nil
-					}
-				}
-				var cmd tea.Cmd
-				d.claudePrompt, cmd = d.claudePrompt.Update(msg)
-				return d, cmd
-			}
-
 			// Single-line prompts (open ticket, epic)
 			switch msg.String() {
 			case "esc":
@@ -475,23 +410,10 @@ func (d DashboardModel) Update(msg tea.Msg, client *jira.Client) (DashboardModel
 			if issue := d.selectedIssue(); issue != nil {
 				issueCopy := *issue
 				d.pendingClaudeIssue = &issueCopy
-				d.selectedWorkflow = ""
-
-				workflows, _ := DiscoverWorkflows()
-				if len(workflows) > 1 {
-					d.workflows = workflows
-					d.workflowCursor = 0
-					d.promptMode = promptWorkflowPicker
-					return d, nil
-				}
-				if len(workflows) == 1 {
-					d.selectedWorkflow = workflows[0].Content
-				}
-				d.promptMode = promptClaude
-				d.claudePrompt.SetWidth(d.list.Width() - 2)
-				d.claudePrompt.Placeholder = fmt.Sprintf("Additional instructions for %s (ctrl+s to submit, esc to cancel)", issue.Key)
-				d.claudePrompt.Reset()
-				return d, d.claudePrompt.Focus()
+				d.picker = d.picker.SetWidth(d.list.Width())
+				var cmd tea.Cmd
+				d.picker, cmd = d.picker.Start(issue.Key, pickerModeLaunch)
+				return d, cmd
 			}
 
 		case key.Matches(msg, dashboardKeys.Tasks):
@@ -569,41 +491,8 @@ func (d DashboardModel) View() string {
 
 	view := d.list.View()
 
-	// Show prompt if active
-	if d.promptMode == promptWorkflowPicker {
-		issueKey := ""
-		if d.pendingClaudeIssue != nil {
-			issueKey = d.pendingClaudeIssue.Key
-		}
-		label := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render(
-			fmt.Sprintf("Select workflow for %s:", issueKey),
-		)
-		var items strings.Builder
-		for i, w := range d.workflows {
-			cursor := "  "
-			style := dimStyle
-			if i == d.workflowCursor {
-				cursor = "> "
-				style = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
-			}
-			items.WriteString(cursor + style.Render(w.Name) + "\n")
-		}
-		hint := dimStyle.Render("j/k: navigate  enter: select  esc: cancel")
-		view = lipgloss.JoinVertical(lipgloss.Left, view, label, items.String(), hint)
-	} else if d.promptMode == promptClaude {
-		issueKey := ""
-		if d.pendingClaudeIssue != nil {
-			issueKey = d.pendingClaudeIssue.Key
-		}
-		label := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render(
-			fmt.Sprintf("Claude task for %s:", issueKey),
-		)
-		taView := lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(colorCyan).
-			Render(d.claudePrompt.View())
-		hint := dimStyle.Render("ctrl+s: submit  enter: skip  esc: cancel")
-		view = lipgloss.JoinVertical(lipgloss.Left, view, label, taView, hint)
+	if d.picker.Active() {
+		view = lipgloss.JoinVertical(lipgloss.Left, view, d.picker.View())
 	} else if d.promptMode != promptNone {
 		var label string
 		switch d.promptMode {

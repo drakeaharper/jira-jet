@@ -162,6 +162,9 @@ type Task struct {
 	Duration     time.Duration
 	Branch       string
 	WorktreePath string
+	Repo         string
+	LaunchCwd    string
+	SessionID    string
 	PRCreated    bool
 	PID          int
 	Reconnected  bool // true if this task was recovered from a previous session
@@ -208,6 +211,10 @@ type persistedTask struct {
 	Cost         float64       `json:"cost,omitempty"`
 	Duration     time.Duration `json:"duration,omitempty"`
 	Branch       string        `json:"branch"`
+	WorktreePath string        `json:"worktree_path,omitempty"`
+	Repo         string        `json:"repo,omitempty"`
+	LaunchCwd    string        `json:"launch_cwd,omitempty"`
+	SessionID    string        `json:"session_id,omitempty"`
 	PRCreated    bool          `json:"pr_created,omitempty"`
 	PRUrl        string        `json:"pr_url,omitempty"`
 	PID          int           `json:"pid,omitempty"`
@@ -304,16 +311,20 @@ func (tm *TaskManager) loadState() {
 
 	for _, pt := range persisted {
 		task := &Task{
-			IssueKey:   pt.IssueKey,
-			Summary:    pt.Summary,
-			StartedAt:  pt.StartedAt,
-			EndedAt:    pt.EndedAt,
-			OutputFile: pt.OutputFile,
-			Cost:       pt.Cost,
-			Duration:   pt.Duration,
-			Branch:     pt.Branch,
-			PRCreated:  pt.PRCreated,
-			PID:        pt.PID,
+			IssueKey:     pt.IssueKey,
+			Summary:      pt.Summary,
+			StartedAt:    pt.StartedAt,
+			EndedAt:      pt.EndedAt,
+			OutputFile:   pt.OutputFile,
+			Cost:         pt.Cost,
+			Duration:     pt.Duration,
+			Branch:       pt.Branch,
+			WorktreePath: pt.WorktreePath,
+			Repo:         pt.Repo,
+			LaunchCwd:    pt.LaunchCwd,
+			SessionID:    pt.SessionID,
+			PRCreated:    pt.PRCreated,
+			PID:          pt.PID,
 		}
 
 		if pt.ErrorMsg != "" {
@@ -362,16 +373,20 @@ func (tm *TaskManager) saveState() {
 	persisted := make([]persistedTask, len(tm.tasks))
 	for i, t := range tm.tasks {
 		pt := persistedTask{
-			IssueKey:   t.IssueKey,
-			Summary:    t.Summary,
-			StartedAt:  t.StartedAt,
-			EndedAt:    t.EndedAt,
-			OutputFile: t.OutputFile,
-			Cost:       t.Cost,
-			Duration:   t.Duration,
-			Branch:     t.Branch,
-			PRCreated:  t.PRCreated,
-			PID:        t.PID,
+			IssueKey:     t.IssueKey,
+			Summary:      t.Summary,
+			StartedAt:    t.StartedAt,
+			EndedAt:      t.EndedAt,
+			OutputFile:   t.OutputFile,
+			Cost:         t.Cost,
+			Duration:     t.Duration,
+			Branch:       t.Branch,
+			WorktreePath: t.WorktreePath,
+			Repo:         t.Repo,
+			LaunchCwd:    t.LaunchCwd,
+			SessionID:    t.SessionID,
+			PRCreated:    t.PRCreated,
+			PID:          t.PID,
 		}
 
 		switch t.Status {
@@ -413,6 +428,16 @@ func processAlive(pid int) bool {
 	return err == nil
 }
 
+// removeWorktree best-effort removes the git worktree associated with a task.
+func removeWorktree(t *Task) {
+	if t.WorktreePath == "" || t.Repo == "" {
+		return
+	}
+	cmd := exec.Command("git", "worktree", "remove", "--force", t.WorktreePath)
+	cmd.Dir = t.Repo
+	cmd.Run()
+}
+
 // ClearTask removes a specific failed/completed task by issue key.
 // Returns false if the task is still running (can't be cleared).
 func (tm *TaskManager) ClearTask(issueKey string) bool {
@@ -426,6 +451,7 @@ func (tm *TaskManager) ClearTask(issueKey string) bool {
 			if t.OutputFile != "" {
 				os.Remove(t.OutputFile)
 			}
+			removeWorktree(t)
 			tm.tasks = append(tm.tasks[:i], tm.tasks[i+1:]...)
 			go tm.saveState()
 			return true
@@ -444,6 +470,7 @@ func (tm *TaskManager) ClearNonRunningTasks() {
 			if t.OutputFile != "" {
 				os.Remove(t.OutputFile)
 			}
+			removeWorktree(t)
 		} else {
 			filtered = append(filtered, t)
 		}
@@ -477,6 +504,7 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, w
 		Status:    TaskRunning,
 		StartedAt: time.Now(),
 		Branch:    branchName,
+		LaunchCwd: workDir,
 		cancel:    cancel,
 		stderr:    &logBuf,
 	}
@@ -550,13 +578,21 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, w
 				task.mu.Unlock()
 			}
 
-			// Capture the result event for parsing later
+			// Peek at the event envelope for routing.
 			var peek struct {
-				Type string `json:"type"`
+				Type      string `json:"type"`
+				Subtype   string `json:"subtype"`
+				SessionID string `json:"session_id"`
 			}
-			if json.Unmarshal(line, &peek) == nil && peek.Type == "result" {
-				lastResultLine = make([]byte, len(line))
-				copy(lastResultLine, line)
+			if json.Unmarshal(line, &peek) == nil {
+				if peek.Type == "result" {
+					lastResultLine = make([]byte, len(line))
+					copy(lastResultLine, line)
+				}
+				if peek.Type == "system" && peek.Subtype == "init" && peek.SessionID != "" && task.SessionID == "" {
+					task.SessionID = peek.SessionID
+					tm.saveState()
+				}
 			}
 		}
 
@@ -635,13 +671,12 @@ func (tm *TaskManager) LaunchTask(issue *jira.Issue, customInstruction string, w
 		if co.WorktreePath != "" {
 			task.WorktreePath = co.WorktreePath
 		}
-
-		// Best-effort worktree cleanup if Claude reported one
-		if co.WorktreePath != "" && co.Repo != "" {
-			remove := exec.Command("git", "worktree", "remove", co.WorktreePath)
-			remove.Dir = co.Repo
-			remove.Run()
+		if co.Repo != "" {
+			task.Repo = co.Repo
 		}
+
+		// Worktree is left in place so the user can resume the Claude session
+		// in it via the task viewer; cleanup happens at clear-time.
 
 		// Write markdown file
 		if err := writeTaskMarkdown(task); err != nil {

@@ -47,8 +47,13 @@ type TaskViewerModel struct {
 	logFollowing bool // true when auto-scrolling to bottom
 
 	// File browser state
-	files         []fileEntry
-	fileSelected  int
+	files        []fileEntry
+	fileSelected int
+
+	// Resume picker state
+	picker            ClaudePicker
+	pendingResumeKey  string
+	resumeStatusMsg   string
 }
 
 // NewTaskViewerModel creates a new task viewer.
@@ -60,6 +65,7 @@ func NewTaskViewerModel(tm *TaskManager, width, height int) TaskViewerModel {
 		viewport:    vp,
 		width:       width,
 		height:      height,
+		picker:      NewClaudePicker(),
 	}
 	tv.files = discoverOutputFiles()
 	return tv
@@ -69,6 +75,7 @@ func (tv TaskViewerModel) SetSize(width, height int) TaskViewerModel {
 	tv.width = width
 	tv.height = height
 	tv.viewport = viewport.New(width, height)
+	tv.picker = tv.picker.SetWidth(width)
 	return tv
 }
 
@@ -102,7 +109,30 @@ func discoverOutputFiles() []fileEntry {
 }
 
 func (tv TaskViewerModel) Update(msg tea.Msg) (TaskViewerModel, tea.Cmd) {
+	// Picker captures all input while active (and only activates from the task list).
+	if tv.picker.Active() {
+		var cmd tea.Cmd
+		tv.picker, cmd = tv.picker.Update(msg)
+		return tv, cmd
+	}
+
 	switch msg := msg.(type) {
+	case claudePickerResultMsg:
+		key := tv.pendingResumeKey
+		tv.pendingResumeKey = ""
+		if msg.cancelled || key == "" {
+			return tv, nil
+		}
+		instruction := msg.instruction
+		workflowContent := msg.workflowContent
+		return tv, func() tea.Msg {
+			return resumeClaudeTaskMsg{
+				issueKey:        key,
+				instruction:     instruction,
+				workflowContent: workflowContent,
+			}
+		}
+
 	case tea.KeyMsg:
 		// Viewport modes — output, logs, file content
 		if tv.mode == taskViewOutput || tv.mode == taskViewLogs || tv.mode == taskViewFileContent {
@@ -230,6 +260,24 @@ func (tv TaskViewerModel) Update(msg tea.Msg) (TaskViewerModel, tea.Cmd) {
 				tv.viewport.SetContent(tv.liveLogsContent())
 				tv.viewport.GotoBottom()
 				return tv, tv.startLogTickIfRunning()
+			}
+		case msg.String() == "c":
+			if tv.selected < len(tv.tasks) {
+				task := tv.tasks[tv.selected]
+				if task.Status == TaskRunning {
+					tv.resumeStatusMsg = "task still running"
+					return tv, nil
+				}
+				if task.SessionID == "" {
+					tv.resumeStatusMsg = "no session_id captured for this task"
+					return tv, nil
+				}
+				tv.resumeStatusMsg = ""
+				tv.pendingResumeKey = task.IssueKey
+				tv.picker = tv.picker.SetWidth(tv.width)
+				var cmd tea.Cmd
+				tv.picker, cmd = tv.picker.Start(task.IssueKey, pickerModeResume)
+				return tv, cmd
 			}
 		case msg.String() == "K":
 			if tv.selected < len(tv.tasks) {
@@ -386,8 +434,12 @@ func (tv TaskViewerModel) View() string {
 		return tv.filesView()
 	}
 
-	// Task list
-	return tv.tasksView()
+	// Task list (with optional picker overlay)
+	body := tv.tasksView()
+	if tv.picker.Active() {
+		return lipgloss.JoinVertical(lipgloss.Left, body, tv.picker.View())
+	}
+	return body
 }
 
 func (tv TaskViewerModel) filesView() string {
@@ -428,7 +480,11 @@ func (tv TaskViewerModel) tasksView() string {
 
 	b.WriteString("\n")
 	b.WriteString(titleStyle.Render("  Claude Tasks") + "\n")
-	b.WriteString(dimStyle.Render(strings.Repeat("─", min(tv.width, 60))) + "\n\n")
+	b.WriteString(dimStyle.Render(strings.Repeat("─", min(tv.width, 60))) + "\n")
+	if tv.resumeStatusMsg != "" {
+		b.WriteString("  " + errorStyle.Render(tv.resumeStatusMsg) + "\n")
+	}
+	b.WriteString("\n")
 
 	if len(tv.tasks) == 0 {
 		b.WriteString(dimStyle.Render("  No tasks yet. Press Shift+C on a ticket to launch one.") + "\n")

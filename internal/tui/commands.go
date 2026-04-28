@@ -81,6 +81,27 @@ type cancelClaudeTaskMsg struct {
 	issueKey string
 }
 
+// claudePickerResultMsg is emitted by the shared workflow + instruction picker.
+type claudePickerResultMsg struct {
+	cancelled       bool
+	instruction     string
+	workflowContent string
+	targetKey       string
+}
+
+type resumeClaudeTaskMsg struct {
+	issueKey        string
+	instruction     string
+	workflowContent string
+}
+
+type resumeDoneMsg struct {
+	issueKey  string
+	err       error
+	startedAt time.Time
+	followup  string
+}
+
 // taskLogTickMsg is sent periodically to refresh the live logs viewport.
 type taskLogTickMsg struct{}
 

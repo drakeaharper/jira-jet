@@ -1,7 +1,14 @@
 package tui
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -109,7 +116,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		// Global quit from dashboard only (not when a prompt is active)
-		if a.activeView == viewDashboard && msg.String() == "q" && !a.dashboard.list.SettingFilter() && a.dashboard.promptMode == promptNone {
+		if a.activeView == viewDashboard && msg.String() == "q" && !a.dashboard.list.SettingFilter() && !a.dashboard.AnyPromptActive() {
 			return a, tea.Quit
 		}
 		if msg.String() == "ctrl+c" {
@@ -252,6 +259,84 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 
+	case resumeClaudeTaskMsg:
+		var task *Task
+		for _, t := range a.taskManager.Tasks() {
+			if t.IssueKey == msg.issueKey {
+				task = t
+				break
+			}
+		}
+		if task == nil || task.SessionID == "" {
+			a.errMsg = fmt.Sprintf("[%s] Cannot resume: no session_id", msg.issueKey)
+			cmds = append(cmds, clearErrAfter(NotifyMedium))
+			return a, tea.Batch(cmds...)
+		}
+		claudePath, err := findClaudeBinary()
+		if err != nil {
+			a.errMsg = fmt.Sprintf("Failed to resume: %s", err)
+			cmds = append(cmds, clearErrAfter(NotifyMedium))
+			return a, tea.Batch(cmds...)
+		}
+		// Claude binds sessions to the cwd they were launched from. The
+		// authoritative source is the session jsonl in ~/.claude/projects/.
+		// Fall back to LaunchCwd / worktree / repo for safety.
+		cwd, _ := findSessionCwd(task.SessionID)
+		if cwd != "" {
+			if _, err := os.Stat(cwd); err != nil {
+				cwd = ""
+			}
+		}
+		if cwd == "" {
+			cwd = task.LaunchCwd
+		}
+		if cwd == "" {
+			cwd = task.WorktreePath
+		}
+		if cwd == "" {
+			cwd = task.Repo
+		}
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
+		args := []string{"--resume", task.SessionID}
+		followup := composeResumeFollowup(msg.workflowContent, msg.instruction)
+		if followup != "" {
+			args = append(args, followup)
+		}
+		cmd := exec.Command(claudePath, args...)
+		cmd.Dir = cwd
+		issueKey := task.IssueKey
+		startedAt := time.Now()
+		return a, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return resumeDoneMsg{
+				issueKey:  issueKey,
+				err:       err,
+				startedAt: startedAt,
+				followup:  followup,
+			}
+		})
+
+	case resumeDoneMsg:
+		var task *Task
+		for _, t := range a.taskManager.Tasks() {
+			if t.IssueKey == msg.issueKey {
+				task = t
+				break
+			}
+		}
+		if task != nil && task.OutputFile != "" {
+			appendResumeStub(task.OutputFile, msg.startedAt, msg.followup, msg.err)
+		}
+		if msg.err != nil {
+			a.errMsg = fmt.Sprintf("[%s] Resume ended with error: %s", msg.issueKey, msg.err)
+			cmds = append(cmds, clearErrAfter(NotifyLong))
+		} else {
+			a.notification = fmt.Sprintf("[%s] Resumed session ended", msg.issueKey)
+			cmds = append(cmds, clearNotificationAfter(NotifyMedium))
+		}
+		return a, tea.Batch(cmds...)
+
 	case clearNotificationMsg:
 		a.notification = ""
 		return a, nil
@@ -385,6 +470,82 @@ func (a App) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, content, statusBar)
 }
 
+// appendResumeStub records that a resume session ran by appending a section
+// to the task's existing markdown output file. Best-effort; ignores errors.
+func appendResumeStub(path string, startedAt time.Time, followup string, runErr error) {
+	duration := time.Since(startedAt).Round(time.Second)
+	var b strings.Builder
+	b.WriteString("\n## Resumed " + startedAt.Format("2006-01-02 15:04") + "\n\n")
+	b.WriteString(fmt.Sprintf("**Duration:** %s\n", duration))
+	if runErr != nil {
+		b.WriteString(fmt.Sprintf("**Exit:** %s\n", runErr))
+	}
+	if followup != "" {
+		b.WriteString("\n**Follow-up:**\n\n")
+		b.WriteString(followup)
+		if !strings.HasSuffix(followup, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(b.String())
+}
+
+// findSessionCwd searches ~/.claude/projects/*/<sessionID>.jsonl for a session
+// file matching the given ID and returns the cwd recorded in it. Claude binds
+// resumable sessions to the cwd they were started in, so this is the
+// authoritative dir to invoke `claude --resume` from.
+func findSessionCwd(sessionID string) (string, bool) {
+	if sessionID == "" {
+		return "", false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	matches, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", sessionID+".jsonl"))
+	if err != nil || len(matches) == 0 {
+		return "", false
+	}
+	f, err := os.Open(matches[0])
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	for scanner.Scan() {
+		var entry struct {
+			Cwd string `json:"cwd"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil && entry.Cwd != "" {
+			return entry.Cwd, true
+		}
+	}
+	return "", false
+}
+
+// composeResumeFollowup combines workflow content and an instruction into a
+// single follow-up prompt for `claude --resume`. Returns "" if both are empty.
+func composeResumeFollowup(workflowContent, instruction string) string {
+	wf := strings.TrimSpace(workflowContent)
+	in := strings.TrimSpace(instruction)
+	switch {
+	case wf == "" && in == "":
+		return ""
+	case wf == "":
+		return in
+	case in == "":
+		return wf
+	default:
+		return wf + "\n\n" + in
+	}
+}
+
 func (a App) refreshDashboard() tea.Cmd {
 	if a.dashboard.viewingProjectEpics != "" {
 		return fetchProjectEpics(a.client, a.dashboard.viewingProjectEpics)
@@ -405,10 +566,10 @@ func (a App) helpBar() string {
 	var bar string
 	switch a.activeView {
 	case viewDashboard:
-		if a.dashboard.promptMode == promptWorkflowPicker {
+		if a.dashboard.picker.InWorkflowPhase() {
 			return prefix + helpBarStyle.Render(" j/k:navigate  enter:select  esc:cancel")
 		}
-		if a.dashboard.promptMode == promptClaude {
+		if a.dashboard.picker.InPromptPhase() {
 			return prefix + helpBarStyle.Render(" enter:new line  ctrl+s:submit  esc:cancel")
 		}
 		if a.dashboard.promptMode != promptNone {
@@ -422,8 +583,10 @@ func (a App) helpBar() string {
 		}
 		bar = helpBarStyle.Render(base)
 	case viewDetail:
-		if a.detail.pickingWorkflow {
+		if a.detail.picker.InWorkflowPhase() {
 			bar = helpBarStyle.Render(" j/k:navigate  enter:select  esc:cancel")
+		} else if a.detail.picker.InPromptPhase() {
+			bar = helpBarStyle.Render(" enter:new line  ctrl+s:submit  esc:cancel")
 		} else {
 			bar = helpBarStyle.Render(" j/k:scroll  e:edit  t:transition  c:comment  C:claude  g:grab  u:back  q:quit")
 		}
@@ -448,9 +611,15 @@ func (a App) helpBar() string {
 	case viewStandup:
 		bar = helpBarStyle.Render(" j/k:navigate  enter:view issue  s:summarize  r:refresh  u:back")
 	case viewTaskViewer:
+		if a.taskViewer.picker.InWorkflowPhase() {
+			return prefix + helpBarStyle.Render(" j/k:navigate  enter:select  esc:cancel")
+		}
+		if a.taskViewer.picker.InPromptPhase() {
+			return prefix + helpBarStyle.Render(" enter:new line  ctrl+s:submit  esc:cancel")
+		}
 		switch a.taskViewer.mode {
 		case taskViewList:
-			bar = helpBarStyle.Render(" j/k:navigate  enter:view output  l:live logs  f:files  K:kill  x:clear task  X:clear all done  r:refresh  u:back")
+			bar = helpBarStyle.Render(" j/k:navigate  enter:view output  l:live logs  c:resume  f:files  K:kill  x:clear task  X:clear all done  r:refresh  u:back")
 		case taskViewFiles:
 			bar = helpBarStyle.Render(" j/k:navigate  enter:view  x:delete file  X:delete all  r:refresh  u:back")
 		case taskViewLogs:

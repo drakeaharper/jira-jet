@@ -25,15 +25,8 @@ type DetailModel struct {
 	commenting  bool
 	commentArea textarea.Model
 
-	// Workflow picker state
-	pickingWorkflow bool
-	workflows       []Workflow
-	workflowCursor  int
-
-	// Claude prompt state
-	promptingClaude  bool
-	claudePrompt     textarea.Model
-	selectedWorkflow string
+	// Shared workflow + instruction picker for Claude task launches.
+	picker ClaudePicker
 }
 
 func NewDetailModel() DetailModel {
@@ -46,16 +39,11 @@ func NewDetailModel() DetailModel {
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
 
-	cp := textarea.New()
-	cp.SetHeight(4)
-	cp.ShowLineNumbers = false
-	cp.CharLimit = 0
-
 	return DetailModel{
-		loading:      true,
-		spinner:      s,
-		commentArea:  ta,
-		claudePrompt: cp,
+		loading:     true,
+		spinner:     s,
+		commentArea: ta,
+		picker:      NewClaudePicker(),
 	}
 }
 
@@ -64,12 +52,12 @@ func (d DetailModel) SetSize(width, height int) DetailModel {
 	d.height = height
 	if d.commenting {
 		d.viewport = viewport.New(width, height-5)
-	} else if d.promptingClaude {
-		d.viewport = viewport.New(width, height-7)
-		d.claudePrompt.SetWidth(width - 4)
+	} else if d.picker.Active() {
+		d.viewport = viewport.New(width, height-d.picker.Height())
 	} else {
 		d.viewport = viewport.New(width, height)
 	}
+	d.picker = d.picker.SetWidth(width - 2)
 	d.viewport.HighPerformanceRendering = false
 	d.ready = true
 	if d.issue != nil {
@@ -91,95 +79,40 @@ func (d DetailModel) SetIssue(issue *jira.Issue) DetailModel {
 func (d DetailModel) Update(msg tea.Msg, client *jira.Client) (DetailModel, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// Picker takes priority over all other input when active.
+	if d.picker.Active() {
+		var cmd tea.Cmd
+		d.picker, cmd = d.picker.Update(msg)
+		// Resize viewport in case picker phase changed.
+		d.viewport = viewport.New(d.width, d.height-d.picker.Height())
+		d.viewport.HighPerformanceRendering = false
+		if d.issue != nil {
+			d.viewport.SetContent(d.renderContent())
+		}
+		return d, cmd
+	}
+
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if d.pickingWorkflow {
-			switch msg.String() {
-			case "esc":
-				d.pickingWorkflow = false
-				d.workflows = nil
-				return d, nil
-			case "j", "down":
-				if d.workflowCursor < len(d.workflows)-1 {
-					d.workflowCursor++
-				}
-				return d, nil
-			case "k", "up":
-				if d.workflowCursor > 0 {
-					d.workflowCursor--
-				}
-				return d, nil
-			case "enter":
-				if d.issue != nil && d.workflowCursor < len(d.workflows) {
-					d.selectedWorkflow = d.workflows[d.workflowCursor].Content
-					d.pickingWorkflow = false
-					d.workflows = nil
-					d.promptingClaude = true
-					d.claudePrompt.SetWidth(d.width - 4)
-					d.claudePrompt.Placeholder = fmt.Sprintf("Additional instructions for %s (ctrl+s to submit, esc to cancel)", d.issue.Key)
-					d.claudePrompt.Reset()
-					d.viewport = viewport.New(d.width, d.height-7)
-					if d.issue != nil {
-						d.viewport.SetContent(d.renderContent())
-					}
-					return d, d.claudePrompt.Focus()
-				}
-				return d, nil
-			}
+	case claudePickerResultMsg:
+		// Picker just closed; restore full-height viewport.
+		d.viewport = viewport.New(d.width, d.height)
+		d.viewport.HighPerformanceRendering = false
+		if d.issue != nil {
+			d.viewport.SetContent(d.renderContent())
+		}
+		if msg.cancelled || d.issue == nil {
 			return d, nil
 		}
-
-		if d.promptingClaude {
-			switch msg.String() {
-			case "esc":
-				d.promptingClaude = false
-				d.selectedWorkflow = ""
-				d.claudePrompt.Blur()
-				d.claudePrompt.Reset()
-				d.viewport = viewport.New(d.width, d.height)
-				if d.issue != nil {
-					d.viewport.SetContent(d.renderContent())
-				}
-				return d, nil
-			case "ctrl+s":
-				instruction := strings.TrimSpace(d.claudePrompt.Value())
-				workflowContent := d.selectedWorkflow
-				d.promptingClaude = false
-				d.selectedWorkflow = ""
-				d.claudePrompt.Blur()
-				d.claudePrompt.Reset()
-				d.viewport = viewport.New(d.width, d.height)
-				if d.issue != nil {
-					issueCopy := *d.issue
-					d.viewport.SetContent(d.renderContent())
-					return d, func() tea.Msg {
-						return launchClaudeTaskMsg{issue: &issueCopy, instruction: instruction, workflowContent: workflowContent}
-					}
-				}
-				return d, nil
-			case "enter":
-				if strings.TrimSpace(d.claudePrompt.Value()) == "" {
-					workflowContent := d.selectedWorkflow
-					d.promptingClaude = false
-					d.selectedWorkflow = ""
-					d.claudePrompt.Blur()
-					d.claudePrompt.Reset()
-					d.viewport = viewport.New(d.width, d.height)
-					if d.issue != nil {
-						issueCopy := *d.issue
-						d.viewport.SetContent(d.renderContent())
-						return d, func() tea.Msg {
-							return launchClaudeTaskMsg{issue: &issueCopy, instruction: "", workflowContent: workflowContent}
-						}
-					}
-					return d, nil
-				}
+		issueCopy := *d.issue
+		return d, func() tea.Msg {
+			return launchClaudeTaskMsg{
+				issue:           &issueCopy,
+				instruction:     msg.instruction,
+				workflowContent: msg.workflowContent,
 			}
-			var cmd tea.Cmd
-			d.claudePrompt, cmd = d.claudePrompt.Update(msg)
-			return d, cmd
 		}
 
+	case tea.KeyMsg:
 		if d.commenting {
 			switch msg.String() {
 			case "esc":
@@ -242,26 +175,13 @@ func (d DetailModel) Update(msg tea.Msg, client *jira.Client) (DetailModel, tea.
 
 		case key.Matches(msg, detailKeys.Claude):
 			if d.issue != nil {
-				workflows, _ := DiscoverWorkflows()
-				if len(workflows) > 1 {
-					d.pickingWorkflow = true
-					d.workflows = workflows
-					d.workflowCursor = 0
-					return d, nil
-				}
-				d.selectedWorkflow = ""
-				if len(workflows) == 1 {
-					d.selectedWorkflow = workflows[0].Content
-				}
-				d.promptingClaude = true
-				d.claudePrompt.SetWidth(d.width - 4)
-				d.claudePrompt.Placeholder = fmt.Sprintf("Additional instructions for %s (ctrl+s to submit, esc to cancel)", d.issue.Key)
-				d.claudePrompt.Reset()
-				d.viewport = viewport.New(d.width, d.height-7)
-				if d.issue != nil {
-					d.viewport.SetContent(d.renderContent())
-				}
-				return d, d.claudePrompt.Focus()
+				d.picker = d.picker.SetWidth(d.width - 2)
+				var cmd tea.Cmd
+				d.picker, cmd = d.picker.Start(d.issue.Key, pickerModeLaunch)
+				d.viewport = viewport.New(d.width, d.height-d.picker.Height())
+				d.viewport.HighPerformanceRendering = false
+				d.viewport.SetContent(d.renderContent())
+				return d, cmd
 			}
 
 		case key.Matches(msg, detailKeys.Open):
@@ -295,46 +215,10 @@ func (d DetailModel) View() string {
 		)
 	}
 
-	if d.pickingWorkflow {
-		var items strings.Builder
-		for i, w := range d.workflows {
-			cursor := "  "
-			style := dimStyle
-			if i == d.workflowCursor {
-				cursor = "> "
-				style = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
-			}
-			items.WriteString(cursor + style.Render(w.Name) + "\n")
-		}
-		issueKey := ""
-		if d.issue != nil {
-			issueKey = d.issue.Key
-		}
-		title := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).
-			Render(fmt.Sprintf("Select workflow for %s", issueKey))
-		hint := dimStyle.Render("j/k: navigate  enter: select  esc: cancel")
-		content := lipgloss.JoinVertical(lipgloss.Left, title, "", items.String(), hint)
-		box := overlayStyle.Width(min(50, d.width-4)).Render(content)
-		return lipgloss.Place(d.width, d.height, lipgloss.Center, lipgloss.Center, box)
-	}
-
-	if d.promptingClaude {
-		issueKey := ""
-		if d.issue != nil {
-			issueKey = d.issue.Key
-		}
-		label := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).
-			Render(fmt.Sprintf("Claude task for %s:", issueKey))
-		taView := lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(colorCyan).
-			Render(d.claudePrompt.View())
-		hint := dimStyle.Render("ctrl+s: submit  enter: skip  esc: cancel")
+	if d.picker.Active() {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			d.viewport.View(),
-			label,
-			taView,
-			hint,
+			d.picker.View(),
 		)
 	}
 
