@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"jet/internal/httpclient"
@@ -365,6 +368,73 @@ func extractTextFromADF(node map[string]interface{}) string {
 	return text.String()
 }
 
+// UploadAttachments uploads one or more files to the given issue.
+// Returns the attachment metadata returned by JIRA on success.
+func (c *Client) UploadAttachments(issueKey string, filePaths []string) ([]Attachment, error) {
+	if len(filePaths) == 0 {
+		return nil, fmt.Errorf("no files provided")
+	}
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	for _, path := range filePaths {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open %s: %w", path, err)
+		}
+		part, err := writer.CreateFormFile("file", filepath.Base(path))
+		if err != nil {
+			f.Close()
+			return nil, fmt.Errorf("failed to create form file: %w", err)
+		}
+		if _, err := io.Copy(part, f); err != nil {
+			f.Close()
+			return nil, fmt.Errorf("failed to copy %s: %w", path, err)
+		}
+		f.Close()
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to finalize multipart body: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("/rest/api/2/issue/%s/attachments", issueKey)
+	reqURL := fmt.Sprintf("%s%s", c.BaseURL, endpoint)
+	req, err := http.NewRequestWithContext(context.Background(), "POST", reqURL, &buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.Email != "" && c.Token != "" {
+		req.SetBasicAuth(c.Email, c.Token)
+	} else if c.Username != "" && c.Token != "" {
+		req.SetBasicAuth(c.Username, c.Token)
+	} else {
+		return nil, fmt.Errorf("authentication credentials not provided")
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "jira-jet/1.0 (Security-Enhanced)")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-Atlassian-Token", "no-check")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := checkResponse(resp, 200, "issue "+issueKey+" attachments"); err != nil {
+		return nil, err
+	}
+
+	var uploaded []Attachment
+	if err := json.NewDecoder(resp.Body).Decode(&uploaded); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return uploaded, nil
+}
+
 func (c *Client) AddComment(issueKey, comment string) error {
 	endpoint := fmt.Sprintf("/rest/api/2/issue/%s/comment", issueKey)
 	
@@ -547,6 +617,31 @@ func (c *Client) getEpicChildrenViaSearch(epicKey string) ([]Issue, error) {
 
 		// Check if we've fetched all issues
 		if startAt + len(searchResp.Issues) >= searchResp.Total {
+			break
+		}
+
+		startAt += maxResults
+	}
+
+	return allIssues, nil
+}
+
+func (c *Client) GetIssueChildren(parentKey string) ([]Issue, error) {
+	jql := fmt.Sprintf("parent = %s ORDER BY key ASC", parentKey)
+
+	var allIssues []Issue
+	startAt := 0
+	maxResults := 100
+
+	for {
+		searchResp, err := c.SearchIssuesWithPagination(jql, startAt, maxResults)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search for child issues: %w", err)
+		}
+
+		allIssues = append(allIssues, searchResp.Issues...)
+
+		if startAt+len(searchResp.Issues) >= searchResp.Total {
 			break
 		}
 

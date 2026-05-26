@@ -19,6 +19,7 @@ var (
 	attachmentDownload bool
 	attachmentOutput   string
 	attachmentIndex    string
+	attachmentUpload   []string
 )
 
 var attachmentsCmd = &cobra.Command{
@@ -30,7 +31,9 @@ Examples:
   jet attachments LX-2956                    # List all attachments
   jet attachments LX-2956 --download         # Download all attachments
   jet attachments LX-2956 --download --index 1,3  # Download attachments 1 and 3
-  jet attachments LX-2956 --download --output /path/to/folder  # Download to specific folder`,
+  jet attachments LX-2956 --download --output /path/to/folder  # Download to specific folder
+  jet attachments LX-2956 --upload ./screenshot.png            # Upload single file
+  jet attachments LX-2956 --upload a.png --upload b.log        # Upload multiple files`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ticketKey := args[0]
@@ -43,6 +46,10 @@ Examples:
 
 		// Create JIRA client
 		client := jira.NewClient(cfg.URL, cfg.Email, cfg.Username, cfg.Token)
+
+		if len(attachmentUpload) > 0 {
+			return uploadAttachments(client, ticketKey, attachmentUpload)
+		}
 
 		// Fetch the ticket
 		issue, err := client.GetIssue(ticketKey)
@@ -215,10 +222,44 @@ func downloadSingleAttachment(attachment jira.Attachment, outputDir string, cfg 
 	return nil
 }
 
+func uploadAttachments(client *jira.Client, ticketKey string, paths []string) error {
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			return fmt.Errorf("cannot access %s: %w", p, err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("%s is a directory; only files are supported", p)
+		}
+	}
+
+	cyan := color.New(color.FgCyan, color.Bold)
+	green := color.New(color.FgGreen)
+	yellow := color.New(color.FgYellow)
+	blue := color.New(color.FgBlue)
+
+	fmt.Printf("%s %d file(s) to %s\n", cyan.Sprint("📤 Uploading"), len(paths), ticketKey)
+	for _, p := range paths {
+		fmt.Printf("   %s %s\n", yellow.Sprint("•"), p)
+	}
+
+	uploaded, err := client.UploadAttachments(ticketKey, paths)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("\n%s Uploaded %d attachment(s):\n", green.Sprint("🎉 Success!"), len(uploaded))
+	for _, a := range uploaded {
+		fmt.Printf("   %s %s (%s)\n", yellow.Sprint("✓"), a.Filename, blue.Sprint(formatFileSize(a.Size)))
+	}
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(attachmentsCmd)
-	
+
 	attachmentsCmd.Flags().BoolVar(&attachmentDownload, "download", false, "Download attachments instead of just listing them")
 	attachmentsCmd.Flags().StringVar(&attachmentOutput, "output", "", "Output directory for downloads (default: TICKET-KEY_attachments)")
 	attachmentsCmd.Flags().StringVar(&attachmentIndex, "index", "", "Comma-separated list of attachment indices to download (e.g., 1,3,5)")
+	attachmentsCmd.Flags().StringArrayVar(&attachmentUpload, "upload", nil, "Upload file(s) to the ticket (repeatable)")
 }
