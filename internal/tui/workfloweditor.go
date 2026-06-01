@@ -35,6 +35,7 @@ type editorPhase int
 
 const (
 	phaseWorkflowList editorPhase = iota
+	phaseTemplatePicker
 	phaseRepoPicker
 	phaseChat
 )
@@ -96,6 +97,10 @@ type WorkflowEditorModel struct {
 	existingWorkflows []Workflow
 	listCursor        int
 
+	// Template picker state (base flows offered when creating a new workflow)
+	templates      []Workflow
+	templateCursor int
+
 	// Editing an existing workflow (non-empty = editing, pre-populates save name)
 	editingPath string
 	editingName string
@@ -137,7 +142,7 @@ func NewWorkflowEditorModel(width, height int) WorkflowEditorModel {
 		m.existingWorkflows = existing
 		m.phase = phaseWorkflowList
 	} else {
-		m.initRepoPicker()
+		m.initTemplatePicker()
 	}
 
 	m = m.recalcLayout()
@@ -169,6 +174,19 @@ func (m *WorkflowEditorModel) initRepoPicker() {
 	} else {
 		m.phase = phaseRepoPicker
 	}
+}
+
+// initTemplatePicker shows the read-only base-flow templates as starting
+// points for a new workflow. Falls back to the repo picker if none are
+// embedded (should not happen in a normal build).
+func (m *WorkflowEditorModel) initTemplatePicker() {
+	m.templates = BaseFlows()
+	m.templateCursor = 0
+	if len(m.templates) == 0 {
+		m.initRepoPicker()
+		return
+	}
+	m.phase = phaseTemplatePicker
 }
 
 // initEditWorkflow sets up the editor with an existing workflow pre-loaded.
@@ -299,8 +317,8 @@ func (m WorkflowEditorModel) Update(msg tea.Msg) (WorkflowEditorModel, tea.Cmd) 
 					m = m.recalcLayout()
 					return m, m.chatInput.Focus()
 				}
-				// "Create new" selected
-				m.initRepoPicker()
+				// "Create new" selected — offer base-flow templates first
+				m.initTemplatePicker()
 				m = m.recalcLayout()
 				if m.phase == phaseChat {
 					return m, m.chatInput.Focus()
@@ -317,12 +335,49 @@ func (m WorkflowEditorModel) Update(msg tea.Msg) (WorkflowEditorModel, tea.Cmd) 
 					}
 					// If no workflows left, go to create flow
 					if len(m.existingWorkflows) == 0 {
-						m.initRepoPicker()
+						m.initTemplatePicker()
 						m = m.recalcLayout()
 						if m.phase == phaseChat {
 							return m, m.chatInput.Focus()
 						}
 					}
+				}
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Template picker phase (offered when creating a new workflow)
+		if m.phase == phaseTemplatePicker {
+			blankIdx := len(m.templates) // "Start from scratch" sits after the templates
+			switch msg.String() {
+			case "esc":
+				// Back to the workflow list if there is one, else exit the editor.
+				if len(m.existingWorkflows) > 0 {
+					m.phase = phaseWorkflowList
+					return m, nil
+				}
+				return m, func() tea.Msg { return goBackMsg{} }
+			case "j", "down":
+				if m.templateCursor < blankIdx {
+					m.templateCursor++
+				}
+				return m, nil
+			case "k", "up":
+				if m.templateCursor > 0 {
+					m.templateCursor--
+				}
+				return m, nil
+			case "enter":
+				if m.templateCursor < blankIdx {
+					// Pre-load the chosen base template's content.
+					m.workflowContent = m.templates[m.templateCursor].Content
+				}
+				// blankIdx selected => start from scratch (empty content).
+				m.initRepoPicker()
+				m = m.recalcLayout()
+				if m.phase == phaseChat {
+					return m, m.chatInput.Focus()
 				}
 				return m, nil
 			}
@@ -512,6 +567,9 @@ func (m WorkflowEditorModel) View() string {
 	if m.phase == phaseWorkflowList {
 		return m.workflowListView()
 	}
+	if m.phase == phaseTemplatePicker {
+		return m.templatePickerView()
+	}
 	if m.phase == phaseRepoPicker {
 		return m.repoPickerView()
 	}
@@ -605,6 +663,35 @@ func (m WorkflowEditorModel) workflowListView() string {
 	hint := dimStyle.Render("j/k: navigate  enter: edit/create  d: delete  esc: back")
 	content := lipgloss.JoinVertical(lipgloss.Left, title, "", items.String(), hint)
 	box := overlayStyle.Width(min(60, m.width-4)).Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m WorkflowEditorModel) templatePickerView() string {
+	title := lipgloss.NewStyle().Foreground(colorCyan).Bold(true).
+		Render("Start from a base template (read-only) or scratch:")
+	var items strings.Builder
+	for i, t := range m.templates {
+		cursor := "  "
+		style := dimStyle
+		if i == m.templateCursor {
+			cursor = "> "
+			style = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+		}
+		items.WriteString(cursor + style.Render(t.Name) + dimStyle.Render(".md") + "\n")
+	}
+	// "Start from scratch" option after the templates
+	blankIdx := len(m.templates)
+	cursor := "  "
+	style := dimStyle
+	if m.templateCursor == blankIdx {
+		cursor = "> "
+		style = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
+	}
+	items.WriteString("\n" + cursor + style.Render("Start from scratch (blank)") + "\n")
+
+	hint := dimStyle.Render("j/k: navigate  enter: select  esc: back")
+	content := lipgloss.JoinVertical(lipgloss.Left, title, "", items.String(), hint)
+	box := overlayStyle.Width(min(70, m.width-4)).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
