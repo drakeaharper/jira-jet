@@ -2,41 +2,36 @@
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
 `/canvas-lms-common:review-auto`. It produces a read-only, expert-augmented
-review of a Gerrit change and a machine-readable verdict. It **never edits
-code, never posts comments, never votes, never pushes, and never chains** into
-comments-and-votes or any fix flow — those belong to a composite.
+review of a Gerrit change **and then posts the inline comments + casts the
+Code-Review vote itself** (its Step 5 hands the Review Summary to
+`comments-and-votes-auto`, default `post-and-vote`). It never edits code and
+never merges/submits.
 
-> Starting template. Refine for your repo, save under a new name. Base
-> templates are read-only and never run directly.
+> 1.5.0 model: "reviewing isn't done until the feedback is on the change."
+> review-auto owns the posting + vote. This is NOT a read-only-and-stop flow.
 
 ## Inputs (parameters)
 
 | Parameter | Source | Required | Notes |
 |-----------|--------|----------|-------|
-| change number | **instruction box** — type the numeric Gerrit change # when launching, OR have HEAD already checked out at the change tip | yes (one of the two) | e.g. `407569`. A `Change-Id` is not enough; the numeric change resolves the rest. |
-| `--focus "<text>"` | **instruction box** (optional) | no | Free-text emphasis directing review attention to specific areas. |
-| `ticket_context` (key + acceptance criteria) | **instruction box** — pass `--ticket KEY` and/or the acceptance criteria; a composite supplies these from `resolve-change-from-ticket` | no | When present, this becomes a **ticket-rooted review**: the flow verifies the change satisfies each acceptance criterion (drives `ac_status`/`ac_gaps`). Absent → review on code merits only (`ac_status: n/a`). |
-
-The ticket key jet auto-appends below may be the review's ticket context. If the
-unit of work is a bare Gerrit change with no ticket, use the change number you
-were given and ignore the appended ticket fields.
+| change number | **instruction box** — numeric Gerrit change #, OR HEAD already at the change tip | yes (one of the two) | e.g. `407569`. |
+| `--focus "<text>"` | **instruction box** (optional) | no | Emphasis directive (security/perf/a11y/…). |
+| `ticket_context` (key + acceptance criteria) | **instruction box** — `--ticket KEY` + AC; a composite supplies these from `resolve-change-from-ticket` | no | Present → **ticket-rooted review**: verifies each acceptance criterion (drives `ac_status`/`ac_gaps`). Absent → code-merits only (`ac_status: n/a`). |
+| `action_level` | **instruction box** (optional) | no — flow default **`post-and-vote`** | Lower it only to override: `post-comments` (comments, no vote) or `recommend-only` (dry run, posts nothing). |
 
 ## What to do
 
-1. Resolve the change: use the numeric change number from the instruction box,
-   else the Gerrit commit already at HEAD.
-2. Invoke **`/canvas-lms-common:review-auto`** — append `--focus "<text>"` if a
-   focus was given, and pass the ticket context (`--ticket KEY` + acceptance
-   criteria) if supplied — and let it run the full review + expert synthesis.
-   With ticket context present, it also walks each acceptance criterion and
-   classifies `ac_status`.
-3. Read-only: do not edit code, push, post comments, or vote.
+1. Resolve the change (instruction-box number, else HEAD at the change tip).
+2. Invoke **`/canvas-lms-common:review-auto`** — append `--focus "<text>"` and/or
+   ticket context (`--ticket KEY` + AC) if supplied. It runs the full review +
+   expert synthesis, then **Step 5 posts the inline comments and casts the CR
+   vote** (default `post-and-vote`) via `comments-and-votes-auto`.
+3. Do not edit code. The CR vote is pre-merge feedback — never merge/submit.
 
 ## Output (the workflow's result — emit verbatim)
 
 End with the flow's machine-readable block exactly as `/review-auto` defines it,
-so a composite can route on `verdict`/`ac_status` and feed `critical[]`+`ac_gaps[]`
-onward:
+so a composite can branch on `verdict`/`ac_status`:
 
 ```
 ## Review Summary (machine-readable)
@@ -48,18 +43,25 @@ critical_count: <n>
 suggestion_count: <n>
 critical:
   - file:line — <one-line problem> — <one-line fix>
-  ...
+suggestions:
+  - kind: <open-question | nit>
+    location: <file:line>
+    problem: <one-line>
+    fix: <one-line>
 ```
 
-- `verdict: pass` only when there are zero Critical Issues **and** `ac_status` is
-  `met` or `n/a`. Any unsatisfied acceptance criterion is a Critical Issue and
-  forces `verdict: changes-requested`.
+- `verdict: pass` only when zero Critical Issues **and** `ac_status` is `met` or
+  `n/a`. A clean review (empty `critical[]`+`suggestions[]`) still posts a CR+2
+  with zero inline comments.
+- The posting result appears in the `comments-and-votes-auto`
+  `## Comments & Vote` block (`recommended_cr`, `posted_comments`, `cast_vote`)
+  that Step 5 emits.
 
 ## Hard stops — surface, never swallow
 
-The flow halts (no output block) when: no change to review (neither arg nor a
-Gerrit commit at HEAD), `gerry fetch` fails, or HEAD is not a Gerrit change and
-no number was given.
+The flow halts when: no change to review (neither arg nor a Gerrit commit at
+HEAD), `gerry fetch` fails, HEAD is not a Gerrit change, or a `gerry` post/vote
+fails in Step 5.
 
-- **Report the stop reason verbatim.** Do not invent a verdict.
-- **Do not auto-retry.** Do not chain into comments-and-votes on a stop.
+- **Report the stop reason verbatim.** Do not invent a verdict or a posted state.
+- **Do not auto-retry**; do not silently skip the posting.

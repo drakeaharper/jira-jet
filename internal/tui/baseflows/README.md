@@ -19,31 +19,36 @@ not written to `~/.jet/workflows/`. Consequences:
   refine it with Claude, then save under a **new** name. The saved copy is what
   becomes launchable.
 
-## Foundation rules honored
+## Foundation rules honored (1.5.0 model)
 
-- **One flow each, no chaining.** Push, release, and routing belong to composite
-  workflows — **except** `base-canvas-parallel-env-auto`, whose whole job is the
-  claim/push/release lifecycle primitive.
-- **Release invariant:** release an env only *after* a push (pushed = resumable).
-  Foundation flows create/update Gerrit *changes* (pre-merge); none merges/submits.
+- **One flow each, no cross-flow chaining/routing** — that belongs to composites.
+- **Each `-auto` flow owns its own outward action.** `start-ticket-auto` and
+  `address-feedback-auto` commit **and push** (`status: pushed`); `review-auto`
+  reviews **and posts comments + casts the CR vote** (via its Step 5 →
+  `comments-and-votes-auto`). `canvas-parallel-env-auto` owns **only** the env
+  lifecycle (claim + release); it does not push or post.
+- **Release invariant:** release only after the flow has pushed/posted (a pushed
+  change is resumable). A ticket flow that hard-stops before pushing → leave the
+  env claimed. Flows create/update Gerrit *changes* (pre-merge); none merges/submits.
 - **Machine block is the contract.** Each workflow emits its flow's block
   verbatim — never parse prose.
 - **Hard stops surface, never swallow.** On `status: stopped` / hard stop:
   return the `stop_reason` + partial output; **no auto-retry**.
-- `base-comments-and-votes-auto` keeps the vote `action_level` a parameter,
-  default `recommend-only` (never auto-escalate outward actions).
+- `base-comments-and-votes-auto` exposes `action_level` as a parameter; the
+  flow's default is **`post-and-vote`** (posts + votes). `recommend-only` is the
+  opt-in dry run. Never escalate *above* the level given.
 
 ## Mapping: workflow → flow → inputs → result fields
 
 | Base workflow | Flow (command/skill) | Inputs (where from) | Result block & gate fields |
 |---------------|----------------------|---------------------|----------------------------|
-| `base-canvas-parallel-env-auto` | `canvas-parallel-env-auto` skill | `mode` (claim\|review), `ticket`\|`change`, `--base-ref`, `--reset-db`, `--focus` — all from instruction box | `## Env Result`: `status`, `env_name`, `url`, `code_path`, `change_url`, `stop_reason` |
-| `base-start-ticket-auto` | `/canvas-lms-common:start-ticket-auto` | ticket key (jet auto-appends) | `## Ticket Result`: **`status: committed\|stopped`**, **`commit_sha`**, `branch`, `files[]`, `tests`, `assumptions`, `stop_reason` |
-| `base-review-auto` | `/canvas-lms-common:review-auto` | change # or HEAD; `--focus`; `ticket_context` (key+AC, optional) — instruction box | `## Review Summary`: **`verdict: pass\|changes-requested`**, **`ac_status: met\|partial\|unmet\|n/a`**, `ac_gaps[]`, `tickets[]`, `critical_count`, `suggestion_count`, **`critical[]`** |
-| `base-address-feedback-auto` | `/canvas-lms-common:address-feedback-auto` | numeric change # (instruction box) | `## Feedback Result`: **`status: amended\|stopped`**, **`amended_sha`**, `comments.{applied,skipped,needs_direction}[]`, `tests`, `stop_reason` |
+| `base-canvas-parallel-env-auto` | `canvas-parallel-env-auto` skill (claim/release only; inner flow pushes/posts) | `mode` (claim\|review), `ticket`\|`change`, `--base-ref`, `--reset-db`, `--focus` — all from instruction box | `## Env Result`: **`status: released\|claimed\|stopped`**, `mode`, `env_name`, `url`, `code_path`, `inner_status`, `stop_reason` |
+| `base-start-ticket-auto` | `/canvas-lms-common:start-ticket-auto` (commits **and pushes**) | ticket key (jet auto-appends) | `## Ticket Result`: **`status: pushed\|stopped`**, **`commit_sha`**, **`gerrit_change`**, `branch`, `files[]`, `tests`, `assumptions`, `stop_reason` |
+| `base-review-auto` | `/canvas-lms-common:review-auto` (reviews **and posts comments + votes**) | change # or HEAD; `--focus`; `ticket_context` (key+AC, optional); `action_level` (default post-and-vote) — instruction box | `## Review Summary`: **`verdict: pass\|changes-requested`**, **`ac_status: met\|partial\|unmet\|n/a`**, `ac_gaps[]`, `tickets[]`, `critical[]`, `suggestions[]{kind}` + the Step-5 `## Comments & Vote` block (`posted_comments`, `cast_vote`) |
+| `base-address-feedback-auto` | `/canvas-lms-common:address-feedback-auto` (amends **and pushes** a patchset) | numeric change # (instruction box) | `## Feedback Result`: **`status: pushed\|stopped`**, **`amended_sha`**, `comments.{applied,skipped,needs_direction}[]`, `tests`, `stop_reason` |
 | `base-setup-test-auto` | `/canvas-lms-common:setup-test-auto` | ticket key (jet auto-appends) | `## Test Plan`: `env_url`, `course_url`, `feature_flag`, **`logins.{teacher,student}.{unique_id,password}`**, **`steps[]`**, **`expected[]`** |
 | `base-qa-auto` | `/canvas-lms-common:qa-auto` | Test Plan block (instruction box); ticket fallback | `## QA Result`: **`verdict: pass\|fail`**, `steps_run`, `screenshots[]`, **`findings[].likely_owner`** |
-| `base-comments-and-votes-auto` | `/canvas-lms-common:comments-and-votes-auto` | findings + change # + `action_level` (instruction box; default `recommend-only`) | `## Comments & Vote`: **`recommended_cr`**, `action_level`, `rationale`, `comments_count`, **`posted_comments`**, **`cast_vote`** |
+| `base-comments-and-votes-auto` | `/canvas-lms-common:comments-and-votes-auto` (posts + votes) | findings + change # + `action_level` (instruction box; **default `post-and-vote`**) | `## Comments & Vote`: **`recommended_cr`**, `action_level`, `rationale`, `comments_count`, **`posted_comments`**, **`cast_vote`** |
 | `base-resolve-change-from-ticket` (HELPER) | `jet view --format json` + `jq` (gerritbot comment) + optional `gerry details` | ticket key (jet auto-appends); change-# override (instruction box) | `## Resolved Change`: **`change_number`**, `change_id`, `ticket_context.{key,summary,acceptance_criteria}`, `candidates[]`, `status`, `stop_reason` |
 
 ## Invoking one
@@ -76,50 +81,58 @@ gate fields** (`status`, `commit_sha`, `verdict`, `findings[].likely_owner`,
 `recommended_cr`). The agent does the branching; jet just supplies the prompt.
 A composite cannot literally "call" a foundation `base-*.md` file (no include
 mechanism) — it inlines the orchestration, invoking the same underlying
-`/canvas-lms-common:<flow>` commands. **The composite owns claim / push / release**
-and runs the inner flows push-free (per ORCHESTRATION.md's lifecycle table).
+`/canvas-lms-common:<flow>` commands. **The composite owns claim, release, and
+sequencing; the inner flows own their own push/post** (1.5.0 lifecycle table) —
+the composite does not add a push or a posting step.
 
 ## `pipeline-canvas-ticket` — TICKET LANE
 
-**Sequence:** claim env → `start-ticket-auto` → `setup-test-auto` → `qa-auto` →
-push → release (with a QA fix loop).
+**Sequence:** claim env → `start-ticket-auto` (commit + **push**) →
+`setup-test-auto` → `qa-auto` → release (with a QA fix loop). No separate push
+node — the flows push themselves.
 
 ```
-claim env → start-ticket-auto → setup-test-auto → qa-auto → push → release
-                  ▲ (stopped→HALT, leave claimed)        │
-                  └──────────── fix loop ◄───────────────┘
+claim env → start-ticket-auto → setup-test-auto → qa-auto → release
+            (commit + PUSH)                          │
+                  ▲ (stopped→HALT, leave claimed)     │
+                  └─ fix: address-feedback-auto ◄─────┘
+                     (amend + PUSH new patchset)
 ```
 
 | Branch point | Gate field | Routing |
 |--------------|-----------|---------|
-| after start-ticket-auto | `status` | `stopped` → **HALT**, surface `stop_reason`, **leave env claimed**; `committed` (`commit_sha` set) → setup-test-auto |
-| after qa-auto | `verdict` | `pass` → push → release; `fail` → route by `findings[].likely_owner` |
-| qa fail routing | `findings[].likely_owner` | `code-bug` → start-ticket-auto re-fix → setup-test+qa; `data-setup` → setup-test+qa; `flag-off`/`unknown` → **HALT**, leave claimed |
+| after start-ticket-auto | `status` | `stopped` → **HALT**, surface `stop_reason`, **leave env claimed** (nothing pushed); `pushed` (`commit_sha`+`gerrit_change` set) → setup-test-auto |
+| after qa-auto | `verdict` | `pass` → release (already pushed); `fail` → route by `findings[].likely_owner` |
+| qa fail routing | `findings[].likely_owner` | `code-bug` → `address-feedback-auto` (amend+push) or start-ticket re-fix → setup-test+qa; `data-setup` → setup-test+qa; `flag-off`/`unknown` → **HALT** (change pushed → release) |
 
-- **Loop cap:** `MAX_FIX_ITERATIONS` (parameter, default `3`). Exhaustion → HALT,
-  leave env claimed.
-- **Lifecycle / release:** composite owns claim/push/release. Push
-  (`HEAD:refs/for/master`) happens **only** after `qa-auto: pass`; release happens
-  **only after push succeeds**. Any halt before push → **env left claimed**. Push
-  fails → do not release, leave claimed. Never merge/submit.
+- **Loop cap:** `MAX_FIX_ITERATIONS` (parameter, default `3`). Exhaustion → HALT.
+- **Lifecycle / release:** composite owns claim + release + sequencing; the
+  **flows push themselves** (`start-ticket-auto`, `address-feedback-auto`). Release
+  after `qa-auto: pass` (the change is already on Gerrit). A `start-ticket-auto:
+  stopped` (pre-push) → **leave env claimed**. Never merge/submit.
 
 ## `pipeline-canvas-review` — REVIEW LANE
 
-**Sequence:** claim env (review mode) → `review-auto` → `comments-and-votes-auto`
-→ release (always).
+**Sequence:** `[resolve-from-ticket]?` → claim env (review mode) → `review-auto`
+(reviews **and posts comments + votes**) → release (always). `review-auto` owns
+the posting via its Step 5 — the composite does **not** add a separate
+comments-and-votes step or suppress it.
 
 ```
-claim env (review) → review-auto → comments-and-votes-auto → release (always)
+[resolve-from-ticket]? → claim env (review) → review-auto → release (always)
+                                              (review + POST + VOTE)
 ```
 
 | Branch point | Gate field | Routing |
 |--------------|-----------|---------|
+| (entry) | change # vs ticket key | numeric change # → claim directly; ticket key → resolve newest gerritbot change first (capture AC) |
 | after claim | `gerry fetch` ok? | fail → release immediately + HALT |
-| after review-auto | `verdict` | `changes-requested` → comments-and-votes with `critical[]`+suggestions (rubric → CR-1/CR+1); `pass` → comments-and-votes with empty/nit findings (rubric → CR+2) |
-| comments-and-votes | `action_level` | acts only at the authorized level; default `recommend-only` posts nothing |
+| review-auto Step 5 | `action_level` | posts inline comments + casts CR vote at the effective level; default **`post-and-vote`** |
+| (informational) | `verdict` / `ac_status` | `changes-requested`/`ac!=met` → CR-1/CR+1 already cast; `pass` → CR+2, zero/nit comments |
 
-- **Parameters:** change number (instruction box), `action_level` (default
-  `recommend-only`, never auto-escalated), optional `--focus`.
+- **Parameters:** change # **or** ticket key (instruction box / auto-appended),
+  `--focus` (optional), `action_level` (default **`post-and-vote`**; opt down to
+  `post-comments` or `recommend-only` for a dry run — never escalate above).
 - **Lifecycle / release:** read-only on the repo, **no push**; **always releases**
   at the end (success or hard stop). Never merge/submit.
 
@@ -134,18 +147,18 @@ claim env (review) → review-auto → comments-and-votes-auto → release (alwa
 3. Review lane: press `C` → pick `review-pipeline` → instruction box: the numeric
    Gerrit change # (+ optional `--focus`, `action_level`) → `ctrl+s`.
 
-### Dry / safe run (do this first)
+### Dry / safe run
 
-Run the **review lane** with `action_level: recommend-only` (the default): it
-claims an env, reviews the change, and **posts nothing / casts no vote / never
-pushes** — it only surfaces the recommended comments + CR and the exact `gerry`
-commands, then releases. That exercises the full claim→review→release path with
-zero outward writes. Escalate to `post-comments` / `post-and-vote` only when
-you've confirmed the recommendation.
+The review lane now **defaults to `post-and-vote`** — it will post comments and
+cast the CR vote on Gerrit. For a zero-write rehearsal, explicitly pass
+`action_level: recommend-only`: it claims an env, reviews the change, **posts
+nothing / casts no vote / never pushes** — only surfaces the recommended comments
++ CR and the exact `gerry` commands, then releases. Use `post-comments` for a
+middle ground (comments, no vote).
 
-(The ticket lane always pushes on `qa-auto: pass`; there is no no-push mode for
-it. To rehearse without a push, stop after `qa-auto` and inspect — or use the
-review lane for a true read-only dry run.)
+(The ticket lane's `start-ticket-auto` **pushes a patchset as soon as it commits**
+— before QA — so there is no no-push mode for it. For a true read-only dry run,
+use the review lane with `recommend-only`.)
 
 ## Source of truth
 

@@ -69,16 +69,19 @@ func TestBaseFlowsExcludesReadme(t *testing.T) {
 	}
 }
 
-// TestBaseFlowsNotOnDisk guards the key invariant: base flows are embedded only,
-// so the on-disk discovery used by the Claude-task launcher never lists them.
-func TestBaseFlowsNotInDiscover(t *testing.T) {
-	disk, err := DiscoverWorkflows()
-	if err != nil {
-		t.Fatalf("DiscoverWorkflows error: %v", err)
-	}
-	for _, w := range disk {
-		if hasTemplatePrefix(w.Name) {
-			t.Errorf("template %q leaked into on-disk DiscoverWorkflows (launcher would show it)", w.Name)
+// TestBaseFlowsAreEmbeddedOnly guards the key invariant: templates come from the
+// embedded FS, NOT from the on-disk ~/.jet/workflows dir that the Claude-task
+// launcher reads via DiscoverWorkflows. Embedded entries carry the sentinel
+// Path "(base template)"; on-disk workflows carry a real filesystem path. This
+// is hermetic — it does not depend on the contents of the user's home dir.
+//
+// (A user may legitimately save a workflow named e.g. "pipeline-canvas-review"
+// to disk to run it; that on-disk copy is separate from the embedded template
+// and is expected to appear in the launcher.)
+func TestBaseFlowsAreEmbeddedOnly(t *testing.T) {
+	for _, f := range BaseFlows() {
+		if f.Path != "(base template)" {
+			t.Errorf("template %q has Path %q; embedded templates must not be sourced from disk", f.Name, f.Path)
 		}
 	}
 }

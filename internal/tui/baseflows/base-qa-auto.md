@@ -6,9 +6,6 @@ Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
 the expected behavior, and emits a pass/fail verdict. It is read-only on the
 codebase — it reports findings, it does **not** fix, push, or chain.
 
-> Starting template. Refine for your repo, save under a new name. Base
-> templates are read-only and never run directly.
-
 ## Inputs (parameters)
 
 | Parameter | Source | Required | Notes |

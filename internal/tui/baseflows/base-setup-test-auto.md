@@ -7,9 +7,6 @@ credentials, and emits a machine-readable **Test Plan**. It does **not** run QA,
 push, or chain — the Test Plan is consumed by a separate `qa-auto` step in a
 composite.
 
-> Starting template. Refine for your repo, save under a new name. Base
-> templates are read-only and never run directly.
-
 ## Inputs (parameters)
 
 | Parameter | Source | Required | Notes |

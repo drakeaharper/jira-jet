@@ -10,9 +10,6 @@ out, push, review, or chain. A composite calls it first, then feeds
 `change_number` + `ticket_context` into `canvas-parallel-env-auto` (review mode)
 and `review-auto`.
 
-> Starting template. Refine for your repo, save under a new name. Base
-> templates are read-only and never run directly.
-
 ## Inputs (parameters)
 
 | Parameter | Source | Required | Notes |
