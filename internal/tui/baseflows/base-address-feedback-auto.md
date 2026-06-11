@@ -1,11 +1,11 @@
-# Foundation: address-feedback-auto
+# Foundation: address-feedback --auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
 `/dragon-canvas:address-feedback --auto`. It pulls Gerrit review comments,
 applies the valid ones, amends the single commit, **and pushes the updated
 patchset to Gerrit itself** (`status: pushed`). It does not re-review or chain.
 
-> 1.5.0 model: the inner flow owns its own push. A composite re-runs `review-auto`
+> 1.5.0 model: the inner flow owns its own push. A composite re-runs `review --auto`
 > after this returns `status: pushed`.
 
 ## Inputs (parameters)
@@ -28,7 +28,7 @@ Gerrit change.
 
 ## Output (the workflow's result — emit verbatim)
 
-End with the flow's machine-readable block exactly as `/address-feedback-auto`
+End with the flow's machine-readable block exactly as `/address-feedback --auto`
 defines it, so a composite can gate on `status` / `amended_sha`:
 
 ```

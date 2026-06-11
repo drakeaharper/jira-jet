@@ -1,10 +1,10 @@
-# Foundation: setup-test-auto
+# Foundation: setup-test --auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
 `/dragon-canvas:setup-test --auto`. It generates and runs the idempotent Ruby
 script that builds a manual-testing course for a ticket, provisions login
 credentials, and emits a machine-readable **Test Plan**. It does **not** run QA,
-push, or chain — the Test Plan is consumed by a separate `qa-auto` step in a
+push, or chain — the Test Plan is consumed by a separate `qa --auto` step in a
 composite.
 
 ## Inputs (parameters)
@@ -23,9 +23,9 @@ composite.
 
 ## Output (the workflow's result — emit verbatim)
 
-End with the flow's machine-readable block exactly as `/setup-test-auto` defines
+End with the flow's machine-readable block exactly as `/setup-test --auto` defines
 it. A composite passes this **whole block (including `logins` with passwords)**
-to `qa-auto`:
+to `qa --auto`:
 
 ```
 ## Test Plan (machine-readable)
@@ -53,4 +53,4 @@ script fails to execute (Rails error, env down), or the ticket has no testable
 scenario. (A missing test user is **not** a stop — the script creates it.)
 
 - **Report the stop reason verbatim**, with whatever was set up so far.
-- **Do not auto-retry.** Do not chain into `qa-auto` on a stop.
+- **Do not auto-retry.** Do not chain into `qa --auto` on a stop.

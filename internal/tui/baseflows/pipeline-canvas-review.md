@@ -3,12 +3,12 @@
 End-to-end **orchestration** of the review lane from ORCHESTRATION.md (1.5.0):
 
 ```
-[resolve-from-ticket]? → cpe-auto(review) → review-auto → release
+[resolve-from-ticket]? → cpe-auto(review) → review --auto → release
                                             (review + POST comments + VOTE)
 ```
 
-**1.5.0 key point:** `review-auto` **posts the inline comments and casts the CR
-vote itself** (its Step 5 → `comments-and-votes-auto`, default `post-and-vote`).
+**1.5.0 key point:** `review --auto` **posts the inline comments and casts the CR
+vote itself** (its Step 5 → `comments-and-votes --auto`, default `post-and-vote`).
 This composite does **not** orchestrate posting separately and must **not**
 suppress it — it only owns **claim, release, and (optionally) resolving a ticket
 to its change**. The posting is the flow's job; let it run.
@@ -22,7 +22,7 @@ to its change**. The posting is the flow's job; let it run.
   (even the jet tool's own source repo). Step 1 claims a **fresh Canvas env** and
   `cd`s into it — the starting directory is irrelevant and is **never** a reason
   to pause, second-guess "posture," or skip execution.
-- **Let the flow post + vote.** `review-auto` posts comments and casts the CR
+- **Let the flow post + vote.** `review --auto` posts comments and casts the CR
   vote by default (`post-and-vote`). Do **not** pass `recommend-only` or
   otherwise hold back the posting unless the instruction box explicitly says so.
 - **Branch only on gate fields** (`verdict`, `ac_status`). Never parse prose.
@@ -35,7 +35,7 @@ to its change**. The posting is the flow's job; let it run.
 | Parameter | Source | Default | Notes |
 |-----------|--------|---------|-------|
 | change number **or** ticket key | **instruction box** / auto-appended ticket | — | A numeric change # goes straight to review. A ticket key triggers resolve-from-ticket first. |
-| `--focus "<text>"` | **instruction box** (optional) | empty | Review emphasis; passed through to `review-auto`. |
+| `--focus "<text>"` | **instruction box** (optional) | empty | Review emphasis; passed through to `review --auto`. |
 | `action_level` | **instruction box** (optional) | **`post-and-vote`** | Only to opt *down* (`post-comments` = comments no vote; `recommend-only` = dry run). Never escalate above post-and-vote. |
 
 ## Diagram
@@ -53,9 +53,9 @@ ticket key (auto-appended)  OR  change # (instruction box)   [+ --focus]
         │ gerry fetch ok?
         ├─ fail ──► [cpe release] immediately; ✋ HALT + report
         ▼ ok  (HEAD detached at change tip)
-[2. review-auto --focus "<focus>" [--ticket KEY + AC]]
+[2. review --auto --focus "<focus>" [--ticket KEY + AC]]
         │  reviews, then Step 5 POSTS inline comments + CASTS CR vote
-        │  (comments-and-votes-auto, default post-and-vote;
+        │  (comments-and-votes --auto, default post-and-vote;
         │   rubric: blocker/ac!=met → CR-1 ; open-question → CR+1 ; nits/clean → CR+2)
         │ verdict (informational — posting already happened):
         ├─ changes-requested / ac!=met → comments posted, CR-1/CR+1 cast
@@ -89,7 +89,7 @@ gerry fetch <CHANGE>      # HEAD → change tip (detached)
 ```
 `gerry fetch` fails → `cpe release <ENV_NAME>` immediately, then HALT.
 
-### 2. review-auto (reviews AND posts AND votes)
+### 2. review --auto (reviews AND posts AND votes)
 Invoke **`/dragon-canvas:review --auto`** — append `--focus "<text>"` and the
 ticket context (`--ticket KEY` + AC) from Step 0 if present. It reviews, then its
 **Step 5 posts the inline comments and casts the CR vote** at the effective

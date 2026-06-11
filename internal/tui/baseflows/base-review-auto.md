@@ -1,14 +1,14 @@
-# Foundation: review-auto
+# Foundation: review --auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
 `/dragon-canvas:review --auto`. It produces a read-only, expert-augmented
 review of a Gerrit change **and then posts the inline comments + casts the
 Code-Review vote itself** (its Step 5 hands the Review Summary to
-`comments-and-votes-auto`, default `post-and-vote`). It never edits code and
+`comments-and-votes --auto`, default `post-and-vote`). It never edits code and
 never merges/submits.
 
 > 1.5.0 model: "reviewing isn't done until the feedback is on the change."
-> review-auto owns the posting + vote. This is NOT a read-only-and-stop flow.
+> review --auto owns the posting + vote. This is NOT a read-only-and-stop flow.
 
 ## Inputs (parameters)
 
@@ -25,12 +25,12 @@ never merges/submits.
 2. Invoke **`/dragon-canvas:review --auto`** — append `--focus "<text>"` and/or
    ticket context (`--ticket KEY` + AC) if supplied. It runs the full review +
    expert synthesis, then **Step 5 posts the inline comments and casts the CR
-   vote** (default `post-and-vote`) via `comments-and-votes-auto`.
+   vote** (default `post-and-vote`) via `comments-and-votes --auto`.
 3. Do not edit code. The CR vote is pre-merge feedback — never merge/submit.
 
 ## Output (the workflow's result — emit verbatim)
 
-End with the flow's machine-readable block exactly as `/review-auto` defines it,
+End with the flow's machine-readable block exactly as `/review --auto` defines it,
 so a composite can branch on `verdict`/`ac_status`:
 
 ```
@@ -53,7 +53,7 @@ suggestions:
 - `verdict: pass` only when zero Critical Issues **and** `ac_status` is `met` or
   `n/a`. A clean review (empty `critical[]`+`suggestions[]`) still posts a CR+2
   with zero inline comments.
-- The posting result appears in the `comments-and-votes-auto`
+- The posting result appears in the `comments-and-votes --auto`
   `## Comments & Vote` block (`recommended_cr`, `posted_comments`, `cast_vote`)
   that Step 5 emits.
 

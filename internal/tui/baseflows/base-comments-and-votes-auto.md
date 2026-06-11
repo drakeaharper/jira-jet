@@ -1,4 +1,4 @@
-# Foundation: comments-and-votes-auto
+# Foundation: comments-and-votes --auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
 `/dragon-canvas:comments-and-votes --auto`. It turns a review's findings into
@@ -13,7 +13,7 @@ release.
 
 | Parameter | Source | Required | Notes |
 |-----------|--------|----------|-------|
-| findings | **instruction box** — paste the `## Review Summary` block from `review-auto`, or an equivalent findings list | yes | Drives the comment set and the CR rubric. |
+| findings | **instruction box** — paste the `## Review Summary` block from `review --auto`, or an equivalent findings list | yes | Drives the comment set and the CR rubric. |
 | change number | **instruction box** — numeric Gerrit change #, else inferred from HEAD subject match | yes (arg preferred) | Needed for `gerry comments add` / `gerry vote`; a `Change-Id` is not accepted there. |
 | `action_level` | **instruction box** (optional) | no — flow **default `post-and-vote`** | `recommend-only` \| `post-comments` \| `post-and-vote`. Lower it to opt down; **never escalate above** `post-and-vote`. |
 
@@ -40,7 +40,7 @@ If no level is provided in the instruction box, use **`post-and-vote`**.
 ## Output (the workflow's result — emit verbatim)
 
 End with the flow's machine-readable block exactly as
-`/comments-and-votes-auto` defines it:
+`/comments-and-votes --auto` defines it:
 
 ```
 ## Comments & Vote (machine-readable)

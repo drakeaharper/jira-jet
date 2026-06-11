@@ -3,12 +3,12 @@
 Foundation (base) **helper** workflow. It resolves a Jira ticket to its Gerrit
 change number, because there is **no gerry/jet ticket→change query** — the link
 lives in **gerritbot comments** on the ticket. It also captures the ticket
-context (key, summary, acceptance criteria) a ticket-rooted `review-auto` needs.
+context (key, summary, acceptance criteria) a ticket-rooted `review --auto` needs.
 
 It is read-only: it queries Jira and (optionally) Gerrit, and does **not** check
 out, push, review, or chain. A composite calls it first, then feeds
 `change_number` + `ticket_context` into `canvas-parallel-env-auto` (review mode)
-and `review-auto`.
+and `review --auto`.
 
 ## Inputs (parameters)
 

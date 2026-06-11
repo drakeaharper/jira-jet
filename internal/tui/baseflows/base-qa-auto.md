@@ -1,4 +1,4 @@
-# Foundation: qa-auto
+# Foundation: qa --auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
 `/dragon-canvas:qa --auto`. It drives the **live Canvas env in a real browser**
@@ -10,12 +10,12 @@ codebase — it reports findings, it does **not** fix, push, or chain.
 
 | Parameter | Source | Required | Notes |
 |-----------|--------|----------|-------|
-| Test Plan block | **instruction box** — paste the `## Test Plan (machine-readable)` block from `setup-test-auto` | preferred | Provides `env_url`, `course_url`, `feature_flag`, `logins.{teacher,student}.{unique_id,password}`, `steps[]`, `expected[]`. |
-| ticket key | **auto-appended by jet** / current branch | fallback | If no Test Plan is supplied, re-derive by running `/setup-test-auto` for the ticket first. |
+| Test Plan block | **instruction box** — paste the `## Test Plan (machine-readable)` block from `setup-test --auto` | preferred | Provides `env_url`, `course_url`, `feature_flag`, `logins.{teacher,student}.{unique_id,password}`, `steps[]`, `expected[]`. |
+| ticket key | **auto-appended by jet** / current branch | fallback | If no Test Plan is supplied, re-derive by running `/setup-test --auto` for the ticket first. |
 
 ## What to do
 
-1. Obtain the Test Plan (from the instruction box; else run `/setup-test-auto`
+1. Obtain the Test Plan (from the instruction box; else run `/setup-test --auto`
    for the ticket to produce one).
 2. Invoke **`/dragon-canvas:qa --auto`** with that Test Plan. It uses the
    `agent-browser` skill to navigate, log in, perform each step, screenshot, and
@@ -24,7 +24,7 @@ codebase — it reports findings, it does **not** fix, push, or chain.
 
 ## Output (the workflow's result — emit verbatim)
 
-End with the flow's machine-readable block exactly as `/qa-auto` defines it, so a
+End with the flow's machine-readable block exactly as `/qa --auto` defines it, so a
 composite can route on `verdict` and classify each finding by `likely_owner`:
 
 ```

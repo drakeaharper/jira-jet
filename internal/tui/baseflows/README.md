@@ -22,10 +22,10 @@ not written to `~/.jet/workflows/`. Consequences:
 ## Foundation rules honored (1.5.0 model)
 
 - **One flow each, no cross-flow chaining/routing** — that belongs to composites.
-- **Each `-auto` flow owns its own outward action.** `start-ticket-auto` and
-  `address-feedback-auto` commit **and push** (`status: pushed`); `review-auto`
+- **Each `-auto` flow owns its own outward action.** `start-ticket --auto` and
+  `address-feedback --auto` commit **and push** (`status: pushed`); `review --auto`
   reviews **and posts comments + casts the CR vote** (via its Step 5 →
-  `comments-and-votes-auto`). `canvas-parallel-env-auto` owns **only** the env
+  `comments-and-votes --auto`). `canvas-parallel-env-auto` owns **only** the env
   lifecycle (claim + release); it does not push or post.
 - **Release invariant:** release only after the flow has pushed/posted (a pushed
   change is resumable). A ticket flow that hard-stops before pushing → leave the
@@ -87,39 +87,39 @@ the composite does not add a push or a posting step.
 
 ## `pipeline-canvas-ticket` — TICKET LANE
 
-**Sequence:** claim env → `start-ticket-auto` (commit + **push**) →
-`setup-test-auto` → `qa-auto` → release (with a QA fix loop). No separate push
+**Sequence:** claim env → `start-ticket --auto` (commit + **push**) →
+`setup-test --auto` → `qa --auto` → release (with a QA fix loop). No separate push
 node — the flows push themselves.
 
 ```
-claim env → start-ticket-auto → setup-test-auto → qa-auto → release
+claim env → start-ticket --auto → setup-test --auto → qa --auto → release
             (commit + PUSH)                          │
                   ▲ (stopped→HALT, leave claimed)     │
-                  └─ fix: address-feedback-auto ◄─────┘
+                  └─ fix: address-feedback --auto ◄─────┘
                      (amend + PUSH new patchset)
 ```
 
 | Branch point | Gate field | Routing |
 |--------------|-----------|---------|
-| after start-ticket-auto | `status` | `stopped` → **HALT**, surface `stop_reason`, **leave env claimed** (nothing pushed); `pushed` (`commit_sha`+`gerrit_change` set) → setup-test-auto |
-| after qa-auto | `verdict` | `pass` → release (already pushed); `fail` → route by `findings[].likely_owner` |
-| qa fail routing | `findings[].likely_owner` | `code-bug` → `address-feedback-auto` (amend+push) or start-ticket re-fix → setup-test+qa; `data-setup` → setup-test+qa; `flag-off`/`unknown` → **HALT** (change pushed → release) |
+| after start-ticket --auto | `status` | `stopped` → **HALT**, surface `stop_reason`, **leave env claimed** (nothing pushed); `pushed` (`commit_sha`+`gerrit_change` set) → setup-test --auto |
+| after qa --auto | `verdict` | `pass` → release (already pushed); `fail` → route by `findings[].likely_owner` |
+| qa fail routing | `findings[].likely_owner` | `code-bug` → `address-feedback --auto` (amend+push) or start-ticket re-fix → setup-test+qa; `data-setup` → setup-test+qa; `flag-off`/`unknown` → **HALT** (change pushed → release) |
 
 - **Loop cap:** `MAX_FIX_ITERATIONS` (parameter, default `3`). Exhaustion → HALT.
 - **Lifecycle / release:** composite owns claim + release + sequencing; the
-  **flows push themselves** (`start-ticket-auto`, `address-feedback-auto`). Release
-  after `qa-auto: pass` (the change is already on Gerrit). A `start-ticket-auto:
+  **flows push themselves** (`start-ticket --auto`, `address-feedback --auto`). Release
+  after `qa --auto: pass` (the change is already on Gerrit). A `start-ticket --auto:
   stopped` (pre-push) → **leave env claimed**. Never merge/submit.
 
 ## `pipeline-canvas-review` — REVIEW LANE
 
-**Sequence:** `[resolve-from-ticket]?` → claim env (review mode) → `review-auto`
-(reviews **and posts comments + votes**) → release (always). `review-auto` owns
+**Sequence:** `[resolve-from-ticket]?` → claim env (review mode) → `review --auto`
+(reviews **and posts comments + votes**) → release (always). `review --auto` owns
 the posting via its Step 5 — the composite does **not** add a separate
 comments-and-votes step or suppress it.
 
 ```
-[resolve-from-ticket]? → claim env (review) → review-auto → release (always)
+[resolve-from-ticket]? → claim env (review) → review --auto → release (always)
                                               (review + POST + VOTE)
 ```
 
@@ -127,7 +127,7 @@ comments-and-votes step or suppress it.
 |--------------|-----------|---------|
 | (entry) | change # vs ticket key | numeric change # → claim directly; ticket key → resolve newest gerritbot change first (capture AC) |
 | after claim | `gerry fetch` ok? | fail → release immediately + HALT |
-| review-auto Step 5 | `action_level` | posts inline comments + casts CR vote at the effective level; default **`post-and-vote`** |
+| review --auto Step 5 | `action_level` | posts inline comments + casts CR vote at the effective level; default **`post-and-vote`** |
 | (informational) | `verdict` / `ac_status` | `changes-requested`/`ac!=met` → CR-1/CR+1 already cast; `pass` → CR+2, zero/nit comments |
 
 - **Parameters:** change # **or** ticket key (instruction box / auto-appended),
@@ -156,7 +156,7 @@ nothing / casts no vote / never pushes** — only surfaces the recommended comme
 + CR and the exact `gerry` commands, then releases. Use `post-comments` for a
 middle ground (comments, no vote).
 
-(The ticket lane's `start-ticket-auto` **pushes a patchset as soon as it commits**
+(The ticket lane's `start-ticket --auto` **pushes a patchset as soon as it commits**
 — before QA — so there is no no-push mode for it. For a true read-only dry run,
 use the review lane with `recommend-only`.)
 

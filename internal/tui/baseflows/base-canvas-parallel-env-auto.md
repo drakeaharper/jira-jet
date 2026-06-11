@@ -4,8 +4,8 @@ Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow: the
 **`dragon-canvas:canvas-parallel-env-auto`** skill — the env-lifecycle
 primitive. Its job is **claim an isolated env → run an inner flow → release**.
 
-> 1.5.0 model: the **inner flow owns its own outward action** — `start-ticket-auto`
-> commits **and pushes**; `review-auto` reviews **and posts comments + votes**.
+> 1.5.0 model: the **inner flow owns its own outward action** — `start-ticket --auto`
+> commits **and pushes**; `review --auto` reviews **and posts comments + votes**.
 > The wrapper owns **only claim + release**; it does not push or post.
 
 ## Inputs (parameters)
@@ -19,7 +19,7 @@ All from the **instruction box** — never prompted, never guessed.
 | `change` | review mode | — | Gerrit change number, e.g. `407569`. |
 | `--base-ref` | no | `origin/master` | Branch base for claim mode. |
 | `--reset-db` | no | `false` | Reset env DB before checkout (claim mode). |
-| `--focus` | no | empty | Review emphasis (review mode); passed through to `review-auto`. |
+| `--focus` | no | empty | Review emphasis (review mode); passed through to `review --auto`. |
 
 Missing a required input for the mode → **stop and report** (no guess, no prompt).
 

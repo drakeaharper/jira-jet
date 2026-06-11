@@ -1,4 +1,4 @@
-# Foundation: start-ticket-auto
+# Foundation: start-ticket --auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
 `/dragon-canvas:start-ticket --auto`. It produces a change for a Jira ticket,
@@ -15,7 +15,7 @@ composite sequences.
 |-----------|--------|----------|-------|
 | ticket key | **auto-appended by jet** (the selected ticket's context is added below this prompt) | yes | e.g. `LX-1234`. Identify it from the appended ticket context first. |
 
-`/start-ticket-auto` derives scope from the ticket and asks nothing.
+`/start-ticket --auto` derives scope from the ticket and asks nothing.
 
 ## What to do
 
@@ -29,7 +29,7 @@ composite sequences.
 
 ## Output (the workflow's result — emit verbatim)
 
-End with the flow's machine-readable block exactly as `/start-ticket-auto`
+End with the flow's machine-readable block exactly as `/start-ticket --auto`
 defines it, so a composite can gate on `status` / `commit_sha` / `gerrit_change`:
 
 ```

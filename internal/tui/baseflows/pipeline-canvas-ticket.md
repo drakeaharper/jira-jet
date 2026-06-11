@@ -3,18 +3,18 @@
 End-to-end **orchestration** of the ticket lane from ORCHESTRATION.md (1.5.0):
 
 ```
-claim env → start-ticket-auto → setup-test-auto → qa-auto → release
+claim env → start-ticket --auto → setup-test --auto → qa --auto → release
             (commit + PUSH)                          │
                   ▲                                   │
-                  └─ fix loop: address-feedback-auto ◄┘
+                  └─ fix loop: address-feedback --auto ◄┘
                      (amend + PUSH new patchset)
 ```
 
-**1.5.0 key point:** the inner flows own their own push — `start-ticket-auto`
-commits **and pushes** a patchset, `address-feedback-auto` amends **and pushes**.
+**1.5.0 key point:** the inner flows own their own push — `start-ticket --auto`
+commits **and pushes** a patchset, `address-feedback --auto` amends **and pushes**.
 There is **no separate push-gate node**. This composite owns **only claim,
 release, and sequencing** (setup-test → qa → fix loop). QA runs against the
-already-pushed change; release happens after `qa-auto: pass`.
+already-pushed change; release happens after `qa --auto: pass`.
 
 ## Non-negotiable rules
 
@@ -28,8 +28,8 @@ already-pushed change; release happens after `qa-auto: pass`.
   `findings[].likely_owner`). Never parse prose.
 - **The flows push; the composite does not.** Do not add a `git push` step.
 - **Release invariant:** release only after the change is safely pushed.
-  `start-ticket-auto: pushed` then `qa-auto: pass` → release. **If
-  `start-ticket-auto` hard-stops before pushing (`status: stopped`), LEAVE THE
+  `start-ticket --auto: pushed` then `qa --auto: pass` → release. **If
+  `start-ticket --auto` hard-stops before pushing (`status: stopped`), LEAVE THE
   ENV CLAIMED** (nothing pushed → releasing orphans work). Never merge/submit.
 - **No auto-retry of a hard stop.** Fix loop is capped at `MAX_FIX_ITERATIONS`.
 
@@ -51,24 +51,24 @@ ticket key (auto-appended)
 [claim env]  cpe doctor → cpe free → cpe claim <ticket> [--base-ref] [--reset-db] → cd code_path
         │                                                              (env CLAIMED)
         ▼
-[start-ticket-auto]  commits + PUSHES the change itself
+[start-ticket --auto]  commits + PUSHES the change itself
         │ status?
         ├─ stopped ─────────────────► ✋ HALT: surface stop_reason + assumptions; LEAVE ENV CLAIMED
         └─ pushed  (commit_sha + gerrit_change set, tests pass, on Gerrit)
                 │
                 ▼
-        [setup-test-auto] ──► ## Test Plan (env_url, course_url, logins{teacher,student}, steps[], expected[])
+        [setup-test --auto] ──► ## Test Plan (env_url, course_url, logins{teacher,student}, steps[], expected[])
                 │
                 ▼
-        [qa-auto]  (consume the WHOLE Test Plan block, incl. logins+passwords)
+        [qa --auto]  (consume the WHOLE Test Plan block, incl. logins+passwords)
                 │ verdict?
-                ├─ pass ───────────► [cpe release]   ✅ DONE  (change already pushed by start-ticket-auto)
+                ├─ pass ───────────► [cpe release]   ✅ DONE  (change already pushed by start-ticket --auto)
                 └─ fail → for each finding, route on findings[].likely_owner:
-                        ├─ code-bug    → [address-feedback-auto <change>] (amend + PUSH new patchset) ┐
-                        │                 (or start-ticket-auto re-fix; the change is already pushed)  │
+                        ├─ code-bug    → [address-feedback --auto <change>] (amend + PUSH new patchset) ┐
+                        │                 (or start-ticket --auto re-fix; the change is already pushed)  │
                         ├─ data-setup  → ─────────────────────────────────────────────────────────── ┤ fix loop
                         │                                                                              ▼
-                        │                                         back to [setup-test-auto] → [qa-auto]
+                        │                                         back to [setup-test --auto] → [qa --auto]
                         │                                         (increment counter; cap MAX_FIX_ITERATIONS)
                         ├─ flag-off    → ✋ HALT + report (human decides flag); env was pushed → release
                         └─ unknown     → ✋ HALT + report (human triage); env was pushed → release
@@ -93,7 +93,7 @@ cd "$CODE_PATH"
 ```
 Surface `URL`.
 
-### 2. start-ticket-auto (commits AND pushes)
+### 2. start-ticket --auto (commits AND pushes)
 Invoke **`/dragon-canvas:start-ticket --auto <TICKET>`** (skip its branch-setup
 step — `cpe claim` already made the branch). It commits and **pushes** the change.
 Read its `## Ticket Result` block.
@@ -102,12 +102,12 @@ Read its `## Ticket Result` block.
 - `status: pushed` (`commit_sha` + `gerrit_change` set) → continue. The change is
   already on Gerrit.
 
-### 3. setup-test-auto
+### 3. setup-test --auto
 Invoke **`/dragon-canvas:setup-test --auto <TICKET>`**. Capture the entire
 `## Test Plan` block (incl. `logins` with passwords — keep it out of verbose logs).
 Hard stop → HALT + report; the change is pushed, so release.
 
-### 4. qa-auto
+### 4. qa --auto
 Invoke **`/dragon-canvas:qa --auto`** with the whole Test Plan block. Read the
 `## QA Result` block.
 - `verdict: pass` → Step 5 (release).
@@ -116,7 +116,7 @@ Invoke **`/dragon-canvas:qa --auto`** with the whole Test Plan block. Read the
 
 ### 5. Release (on `verdict: pass`)
 ```bash
-cpe release <ENV_NAME>   # change was already pushed by start-ticket-auto / address-feedback-auto
+cpe release <ENV_NAME>   # change was already pushed by start-ticket --auto / address-feedback --auto
 ```
 Report the `gerrit_change` URL + that the env was released. **DONE.** Never merge/submit.
 
@@ -124,7 +124,7 @@ Report the `gerrit_change` URL + that the env was released. **DONE.** Never merg
 Route each `findings[].likely_owner`:
 - **`code-bug`** → the change is already pushed, so invoke
   **`/dragon-canvas:address-feedback --auto <change>`** (amends + **pushes** a
-  new patchset) — or `start-ticket-auto <TICKET>` re-fix — passing the QA
+  new patchset) — or `start-ticket --auto <TICKET>` re-fix — passing the QA
   `findings[]` as the defect. Then **re-run Step 3 → Step 4**.
 - **`data-setup`** → skip the code fix; **re-run Step 3 → Step 4** (re-provision).
 - **`flag-off`** → **HALT + report** (human decides flag); change pushed → release.
