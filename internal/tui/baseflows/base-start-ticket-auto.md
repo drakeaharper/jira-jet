@@ -1,7 +1,7 @@
 # Foundation: start-ticket-auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
-`/canvas-lms-common:start-ticket-auto`. It produces a change for a Jira ticket,
+`/dragon-canvas:start-ticket --auto`. It produces a change for a Jira ticket,
 **commits once, and pushes it to Gerrit itself** (`status: pushed`). It does
 **not** run tests-setup, QA, review, or chain — those are separate steps a
 composite sequences.
@@ -20,7 +20,7 @@ composite sequences.
 ## What to do
 
 1. Read the appended ticket context and identify the ticket key.
-2. Invoke **`/canvas-lms-common:start-ticket-auto <TICKET_KEY>`** and let it drive
+2. Invoke **`/dragon-canvas:start-ticket --auto <TICKET_KEY>`** and let it drive
    the whole job: deep analysis, issue-type branch, failing test for bugs,
    implementation, pre-commit verification, single commit, **and the
    `git push origin HEAD:refs/for/master` that creates/updates the Gerrit

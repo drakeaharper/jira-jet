@@ -1,7 +1,7 @@
 # Foundation: address-feedback-auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
-`/canvas-lms-common:address-feedback-auto`. It pulls Gerrit review comments,
+`/dragon-canvas:address-feedback --auto`. It pulls Gerrit review comments,
 applies the valid ones, amends the single commit, **and pushes the updated
 patchset to Gerrit itself** (`status: pushed`). It does not re-review or chain.
 
@@ -20,7 +20,7 @@ Gerrit change.
 ## What to do
 
 1. Resolve the change number (instruction-box arg first; else HEAD subject match).
-2. Invoke **`/canvas-lms-common:address-feedback-auto <CHANGE_NUMBER>`**. It
+2. Invoke **`/dragon-canvas:address-feedback --auto <CHANGE_NUMBER>`**. It
    classifies each reviewer comment `valid` / `invalid` / `needs-direction`,
    applies the valid ones, amends the single commit, re-verifies tests, **and
    pushes the updated patchset** (`git push origin HEAD:refs/for/master` — updates

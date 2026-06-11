@@ -43,12 +43,12 @@ not written to `~/.jet/workflows/`. Consequences:
 | Base workflow | Flow (command/skill) | Inputs (where from) | Result block & gate fields |
 |---------------|----------------------|---------------------|----------------------------|
 | `base-canvas-parallel-env-auto` | `canvas-parallel-env-auto` skill (claim/release only; inner flow pushes/posts) | `mode` (claim\|review), `ticket`\|`change`, `--base-ref`, `--reset-db`, `--focus` — all from instruction box | `## Env Result`: **`status: released\|claimed\|stopped`**, `mode`, `env_name`, `url`, `code_path`, `inner_status`, `stop_reason` |
-| `base-start-ticket-auto` | `/canvas-lms-common:start-ticket-auto` (commits **and pushes**) | ticket key (jet auto-appends) | `## Ticket Result`: **`status: pushed\|stopped`**, **`commit_sha`**, **`gerrit_change`**, `branch`, `files[]`, `tests`, `assumptions`, `stop_reason` |
-| `base-review-auto` | `/canvas-lms-common:review-auto` (reviews **and posts comments + votes**) | change # or HEAD; `--focus`; `ticket_context` (key+AC, optional); `action_level` (default post-and-vote) — instruction box | `## Review Summary`: **`verdict: pass\|changes-requested`**, **`ac_status: met\|partial\|unmet\|n/a`**, `ac_gaps[]`, `tickets[]`, `critical[]`, `suggestions[]{kind}` + the Step-5 `## Comments & Vote` block (`posted_comments`, `cast_vote`) |
-| `base-address-feedback-auto` | `/canvas-lms-common:address-feedback-auto` (amends **and pushes** a patchset) | numeric change # (instruction box) | `## Feedback Result`: **`status: pushed\|stopped`**, **`amended_sha`**, `comments.{applied,skipped,needs_direction}[]`, `tests`, `stop_reason` |
-| `base-setup-test-auto` | `/canvas-lms-common:setup-test-auto` | ticket key (jet auto-appends) | `## Test Plan`: `env_url`, `course_url`, `feature_flag`, **`logins.{teacher,student}.{unique_id,password}`**, **`steps[]`**, **`expected[]`** |
-| `base-qa-auto` | `/canvas-lms-common:qa-auto` | Test Plan block (instruction box); ticket fallback | `## QA Result`: **`verdict: pass\|fail`**, `steps_run`, `screenshots[]`, **`findings[].likely_owner`** |
-| `base-comments-and-votes-auto` | `/canvas-lms-common:comments-and-votes-auto` (posts + votes) | findings + change # + `action_level` (instruction box; **default `post-and-vote`**) | `## Comments & Vote`: **`recommended_cr`**, `action_level`, `rationale`, `comments_count`, **`posted_comments`**, **`cast_vote`** |
+| `base-start-ticket-auto` | `/dragon-canvas:start-ticket --auto` (commits **and pushes**) | ticket key (jet auto-appends) | `## Ticket Result`: **`status: pushed\|stopped`**, **`commit_sha`**, **`gerrit_change`**, `branch`, `files[]`, `tests`, `assumptions`, `stop_reason` |
+| `base-review-auto` | `/dragon-canvas:review --auto` (reviews **and posts comments + votes**) | change # or HEAD; `--focus`; `ticket_context` (key+AC, optional); `action_level` (default post-and-vote) — instruction box | `## Review Summary`: **`verdict: pass\|changes-requested`**, **`ac_status: met\|partial\|unmet\|n/a`**, `ac_gaps[]`, `tickets[]`, `critical[]`, `suggestions[]{kind}` + the Step-5 `## Comments & Vote` block (`posted_comments`, `cast_vote`) |
+| `base-address-feedback-auto` | `/dragon-canvas:address-feedback --auto` (amends **and pushes** a patchset) | numeric change # (instruction box) | `## Feedback Result`: **`status: pushed\|stopped`**, **`amended_sha`**, `comments.{applied,skipped,needs_direction}[]`, `tests`, `stop_reason` |
+| `base-setup-test-auto` | `/dragon-canvas:setup-test --auto` | ticket key (jet auto-appends) | `## Test Plan`: `env_url`, `course_url`, `feature_flag`, **`logins.{teacher,student}.{unique_id,password}`**, **`steps[]`**, **`expected[]`** |
+| `base-qa-auto` | `/dragon-canvas:qa --auto` | Test Plan block (instruction box); ticket fallback | `## QA Result`: **`verdict: pass\|fail`**, `steps_run`, `screenshots[]`, **`findings[].likely_owner`** |
+| `base-comments-and-votes-auto` | `/dragon-canvas:comments-and-votes --auto` (posts + votes) | findings + change # + `action_level` (instruction box; **default `post-and-vote`**) | `## Comments & Vote`: **`recommended_cr`**, `action_level`, `rationale`, `comments_count`, **`posted_comments`**, **`cast_vote`** |
 | `base-resolve-change-from-ticket` (HELPER) | `jet view --format json` + `jq` (gerritbot comment) + optional `gerry details` | ticket key (jet auto-appends); change-# override (instruction box) | `## Resolved Change`: **`change_number`**, `change_id`, `ticket_context.{key,summary,acceptance_criteria}`, `candidates[]`, `status`, `stop_reason` |
 
 ## Invoking one
@@ -81,7 +81,7 @@ gate fields** (`status`, `commit_sha`, `verdict`, `findings[].likely_owner`,
 `recommended_cr`). The agent does the branching; jet just supplies the prompt.
 A composite cannot literally "call" a foundation `base-*.md` file (no include
 mechanism) — it inlines the orchestration, invoking the same underlying
-`/canvas-lms-common:<flow>` commands. **The composite owns claim, release, and
+`/dragon-canvas:<flow>` commands. **The composite owns claim, release, and
 sequencing; the inner flows own their own push/post** (1.5.0 lifecycle table) —
 the composite does not add a push or a posting step.
 
@@ -163,7 +163,7 @@ use the review lane with `recommend-only`.)
 ## Source of truth
 
 These templates mirror the contracts in
-`claude-code-plugins/plugins/canvas-lms-common/`:
+`dragon-marketplace/plugins/dragon-canvas/`:
 `docs/autonomous-flows/ORCHESTRATION.md`, the per-flow files `01`–`07`, and the
 authoritative `commands/<flow>.md` / `skills/canvas-parallel-env-auto/SKILL.md`.
 Do not edit those command/skill files to change a workflow — edit the template.

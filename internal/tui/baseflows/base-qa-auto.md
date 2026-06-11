@@ -1,7 +1,7 @@
 # Foundation: qa-auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
-`/canvas-lms-common:qa-auto`. It drives the **live Canvas env in a real browser**
+`/dragon-canvas:qa --auto`. It drives the **live Canvas env in a real browser**
 (via the `agent-browser` skill) through a ticket's manual test steps, asserts
 the expected behavior, and emits a pass/fail verdict. It is read-only on the
 codebase — it reports findings, it does **not** fix, push, or chain.
@@ -17,7 +17,7 @@ codebase — it reports findings, it does **not** fix, push, or chain.
 
 1. Obtain the Test Plan (from the instruction box; else run `/setup-test-auto`
    for the ticket to produce one).
-2. Invoke **`/canvas-lms-common:qa-auto`** with that Test Plan. It uses the
+2. Invoke **`/dragon-canvas:qa --auto`** with that Test Plan. It uses the
    `agent-browser` skill to navigate, log in, perform each step, screenshot, and
    assert each `expected[]` behavior against observed state. Do not simulate.
 3. Report findings only. Do not edit code, push, or launch a fix flow.

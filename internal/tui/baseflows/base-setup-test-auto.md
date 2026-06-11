@@ -1,7 +1,7 @@
 # Foundation: setup-test-auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
-`/canvas-lms-common:setup-test-auto`. It generates and runs the idempotent Ruby
+`/dragon-canvas:setup-test --auto`. It generates and runs the idempotent Ruby
 script that builds a manual-testing course for a ticket, provisions login
 credentials, and emits a machine-readable **Test Plan**. It does **not** run QA,
 push, or chain — the Test Plan is consumed by a separate `qa-auto` step in a
@@ -16,7 +16,7 @@ composite.
 ## What to do
 
 1. Identify the ticket key from the appended ticket context (or current branch).
-2. Invoke **`/canvas-lms-common:setup-test-auto <TICKET_KEY>`**. It is idempotent
+2. Invoke **`/dragon-canvas:setup-test --auto <TICKET_KEY>`**. It is idempotent
    — re-running reuses the existing course rather than duplicating, and creates
    (or resets) the test users with a known dev-only password.
 3. Emit the Test Plan as the result. Do not start a browser or run QA here.

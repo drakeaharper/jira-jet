@@ -1,7 +1,7 @@
 # Foundation: comments-and-votes-auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
-`/canvas-lms-common:comments-and-votes-auto`. It turns a review's findings into
+`/dragon-canvas:comments-and-votes --auto`. It turns a review's findings into
 **inline Gerrit comments** and a **Code-Review (CR) vote** following the rubric,
 and **posts + votes via the `gerry` CLI — that is its job**. It does not chain or
 release.
@@ -31,7 +31,7 @@ If no level is provided in the instruction box, use **`post-and-vote`**.
 
 1. Take the findings and change number from the instruction box (resolve the
    change from HEAD's subject only if no numeric arg was given).
-2. Invoke **`/canvas-lms-common:comments-and-votes-auto <CHANGE_NUMBER>
+2. Invoke **`/dragon-canvas:comments-and-votes --auto <CHANGE_NUMBER>
    --action-level <LEVEL>`** (omit the flag ⇒ default `post-and-vote`).
 3. The CR score is always rubric-driven (blocker → CR-1, open question → CR+1,
    only nits → CR+2). Never cast a score the rubric doesn't support, and never

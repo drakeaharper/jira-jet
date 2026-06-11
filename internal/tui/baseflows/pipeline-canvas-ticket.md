@@ -94,7 +94,7 @@ cd "$CODE_PATH"
 Surface `URL`.
 
 ### 2. start-ticket-auto (commits AND pushes)
-Invoke **`/canvas-lms-common:start-ticket-auto <TICKET>`** (skip its branch-setup
+Invoke **`/dragon-canvas:start-ticket --auto <TICKET>`** (skip its branch-setup
 step — `cpe claim` already made the branch). It commits and **pushes** the change.
 Read its `## Ticket Result` block.
 - `status: stopped` → **HALT**: surface `stop_reason` + `assumptions`; **leave env
@@ -103,12 +103,12 @@ Read its `## Ticket Result` block.
   already on Gerrit.
 
 ### 3. setup-test-auto
-Invoke **`/canvas-lms-common:setup-test-auto <TICKET>`**. Capture the entire
+Invoke **`/dragon-canvas:setup-test --auto <TICKET>`**. Capture the entire
 `## Test Plan` block (incl. `logins` with passwords — keep it out of verbose logs).
 Hard stop → HALT + report; the change is pushed, so release.
 
 ### 4. qa-auto
-Invoke **`/canvas-lms-common:qa-auto`** with the whole Test Plan block. Read the
+Invoke **`/dragon-canvas:qa --auto`** with the whole Test Plan block. Read the
 `## QA Result` block.
 - `verdict: pass` → Step 5 (release).
 - `verdict: fail` → Step 6 (route findings), unless the loop cap is hit.
@@ -123,7 +123,7 @@ Report the `gerrit_change` URL + that the env was released. **DONE.** Never merg
 ### 6. Fix loop (on `verdict: fail`, counter < MAX_FIX_ITERATIONS)
 Route each `findings[].likely_owner`:
 - **`code-bug`** → the change is already pushed, so invoke
-  **`/canvas-lms-common:address-feedback-auto <change>`** (amends + **pushes** a
+  **`/dragon-canvas:address-feedback --auto <change>`** (amends + **pushes** a
   new patchset) — or `start-ticket-auto <TICKET>` re-fix — passing the QA
   `findings[]` as the defect. Then **re-run Step 3 → Step 4**.
 - **`data-setup`** → skip the code fix; **re-run Step 3 → Step 4** (re-provision).

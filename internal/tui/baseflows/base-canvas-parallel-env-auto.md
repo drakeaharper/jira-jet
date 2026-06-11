@@ -1,7 +1,7 @@
 # Foundation: canvas-parallel-env-auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow: the
-**`canvas-lms-common:canvas-parallel-env-auto`** skill — the env-lifecycle
+**`dragon-canvas:canvas-parallel-env-auto`** skill — the env-lifecycle
 primitive. Its job is **claim an isolated env → run an inner flow → release**.
 
 > 1.5.0 model: the **inner flow owns its own outward action** — `start-ticket-auto`
@@ -25,16 +25,16 @@ Missing a required input for the mode → **stop and report** (no guess, no prom
 
 ## What to do
 
-Invoke the **`canvas-lms-common:canvas-parallel-env-auto`** skill with the inputs
+Invoke the **`dragon-canvas:canvas-parallel-env-auto`** skill with the inputs
 above and let it run its lifecycle:
 
 - **Preflight** — `cpe` on `$PATH`, `cpe doctor` clean, a free pool env exists.
 - **Claim** — claim an isolated env; `cd` into its `code_path`
   (review mode: `--no-checkout` then `gerry fetch <change>`).
 - **Inner flow** (owns its own push/post):
-  - claim mode → `/canvas-lms-common:start-ticket-auto <ticket>` (commits **and
+  - claim mode → `/dragon-canvas:start-ticket --auto <ticket>` (commits **and
     pushes** the change).
-  - review mode → `/canvas-lms-common:review-auto --focus "<focus>"` (reviews
+  - review mode → `/dragon-canvas:review --auto --focus "<focus>"` (reviews
     **and posts comments + casts the CR vote**).
 - **Release** — the wrapper owns only this:
   - **inner flow succeeded** (ticket `status: pushed`, or review posted) → `cpe release`.

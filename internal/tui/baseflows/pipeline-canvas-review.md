@@ -90,7 +90,7 @@ gerry fetch <CHANGE>      # HEAD → change tip (detached)
 `gerry fetch` fails → `cpe release <ENV_NAME>` immediately, then HALT.
 
 ### 2. review-auto (reviews AND posts AND votes)
-Invoke **`/canvas-lms-common:review-auto`** — append `--focus "<text>"` and the
+Invoke **`/dragon-canvas:review --auto`** — append `--focus "<text>"` and the
 ticket context (`--ticket KEY` + AC) from Step 0 if present. It reviews, then its
 **Step 5 posts the inline comments and casts the CR vote** at the effective
 `action_level` (default **`post-and-vote`**). Read the `## Review Summary` and the

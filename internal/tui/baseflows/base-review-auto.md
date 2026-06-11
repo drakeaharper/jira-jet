@@ -1,7 +1,7 @@
 # Foundation: review-auto
 
 Foundation (base) workflow. Wraps **exactly one** Canvas autonomous flow:
-`/canvas-lms-common:review-auto`. It produces a read-only, expert-augmented
+`/dragon-canvas:review --auto`. It produces a read-only, expert-augmented
 review of a Gerrit change **and then posts the inline comments + casts the
 Code-Review vote itself** (its Step 5 hands the Review Summary to
 `comments-and-votes-auto`, default `post-and-vote`). It never edits code and
@@ -22,7 +22,7 @@ never merges/submits.
 ## What to do
 
 1. Resolve the change (instruction-box number, else HEAD at the change tip).
-2. Invoke **`/canvas-lms-common:review-auto`** — append `--focus "<text>"` and/or
+2. Invoke **`/dragon-canvas:review --auto`** — append `--focus "<text>"` and/or
    ticket context (`--ticket KEY` + AC) if supplied. It runs the full review +
    expert synthesis, then **Step 5 posts the inline comments and casts the CR
    vote** (default `post-and-vote`) via `comments-and-votes-auto`.
