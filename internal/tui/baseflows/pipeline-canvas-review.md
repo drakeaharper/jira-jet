@@ -1,13 +1,14 @@
 # Composite: canvas-review-pipeline (REVIEW LANE)
 
-End-to-end **orchestration** of the review lane from ORCHESTRATION.md (1.5.0):
+End-to-end **orchestration** of the review lane over the dragon-canvas
+autonomous flows:
 
 ```
 [resolve-from-ticket]? → cpe-auto(review) → review --auto → release
                                             (review + POST comments + VOTE)
 ```
 
-**1.5.0 key point:** `review --auto` **posts the inline comments and casts the CR
+**Key point:** `review --auto` **posts the inline comments and casts the CR
 vote itself** (its Step 5 → `comments-and-votes --auto`, default `post-and-vote`).
 This composite does **not** orchestrate posting separately and must **not**
 suppress it — it only owns **claim, release, and (optionally) resolving a ticket

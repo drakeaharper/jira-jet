@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// baseFlowsFS holds the read-only foundation workflow templates that ship with
+// baseFlowsFS holds the read-only composite pipeline templates that ship with
 // the binary. They are NEVER written to ~/.jet/workflows/, so DiscoverWorkflows
 // (and thus the Claude-task launcher) never lists them — they are only offered
 // as starting templates when creating a new workflow in the editor.
@@ -15,8 +15,9 @@ import (
 var baseFlowsFS embed.FS
 
 // BaseFlows returns the embedded workflow templates, sorted by name: the
-// foundation flows (base-*.md, one per -auto flow) and the composite pipelines
-// (pipeline-*.md). README.md and anything else is excluded.
+// composite pipelines (pipeline-*.md), which orchestrate the dragon-canvas
+// `/dragon-canvas:*` autonomous commands directly. README.md and anything else
+// is excluded.
 func BaseFlows() []Workflow {
 	entries, err := baseFlowsFS.ReadDir("baseflows")
 	if err != nil {
@@ -26,7 +27,7 @@ func BaseFlows() []Workflow {
 	var flows []Workflow
 	for _, e := range entries {
 		name := e.Name()
-		isTemplate := strings.HasPrefix(name, "base-") || strings.HasPrefix(name, "pipeline-")
+		isTemplate := strings.HasPrefix(name, "pipeline-")
 		if e.IsDir() || !strings.HasSuffix(name, ".md") || !isTemplate {
 			continue
 		}

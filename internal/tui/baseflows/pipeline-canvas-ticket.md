@@ -1,6 +1,7 @@
 # Composite: canvas-ticket-pipeline (TICKET LANE)
 
-End-to-end **orchestration** of the ticket lane from ORCHESTRATION.md (1.5.0):
+End-to-end **orchestration** of the ticket lane over the dragon-canvas
+autonomous flows:
 
 ```
 claim env → start-ticket --auto → setup-test --auto → qa --auto → release
@@ -10,7 +11,7 @@ claim env → start-ticket --auto → setup-test --auto → qa --auto → releas
                      (amend + PUSH new patchset)
 ```
 
-**1.5.0 key point:** the inner flows own their own push — `start-ticket --auto`
+**Key point:** the inner flows own their own push — `start-ticket --auto`
 commits **and pushes** a patchset, `address-feedback --auto` amends **and pushes**.
 There is **no separate push-gate node**. This composite owns **only claim,
 release, and sequencing** (setup-test → qa → fix loop). QA runs against the

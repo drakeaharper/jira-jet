@@ -6,23 +6,15 @@ import (
 )
 
 // expectedBaseFlows is the set of templates that must ship embedded:
-// seven foundation flows (base-*, one per -auto flow) plus two composite
-// pipelines (pipeline-*).
+// two composite pipelines (pipeline-*) that orchestrate the dragon-canvas
+// `/dragon-canvas:*` autonomous commands directly.
 var expectedBaseFlows = []string{
-	"base-address-feedback-auto",
-	"base-canvas-parallel-env-auto",
-	"base-comments-and-votes-auto",
-	"base-qa-auto",
-	"base-resolve-change-from-ticket",
-	"base-review-auto",
-	"base-setup-test-auto",
-	"base-start-ticket-auto",
 	"pipeline-canvas-review",
 	"pipeline-canvas-ticket",
 }
 
 // templatePrefixes are the filename prefixes BaseFlows() recognizes.
-var templatePrefixes = []string{"base-", "pipeline-"}
+var templatePrefixes = []string{"pipeline-"}
 
 func hasTemplatePrefix(name string) bool {
 	for _, p := range templatePrefixes {
@@ -50,7 +42,7 @@ func TestBaseFlowsReturnsAllExpected(t *testing.T) {
 			continue
 		}
 		if !hasTemplatePrefix(f.Name) {
-			t.Errorf("template %q has no recognized prefix (base-/pipeline-)", f.Name)
+			t.Errorf("template %q has no recognized prefix (pipeline-)", f.Name)
 		}
 		if strings.TrimSpace(f.Content) == "" {
 			t.Errorf("base flow %q has empty content", f.Name)
