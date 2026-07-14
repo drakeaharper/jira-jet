@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"jet/internal/jira"
+	"jet/internal/prs"
 )
 
 // Navigation messages
@@ -114,6 +115,13 @@ func taskLogTick() tea.Cmd {
 type navigateToTaskViewerMsg struct{}
 type navigateToWorkflowEditorMsg struct{}
 type navigateToStandupMsg struct{ days int }
+type navigateToPRsMsg struct{ scope string }
+
+// prsLoadedMsg carries aggregated PRs (and non-fatal per-source warnings).
+type prsLoadedMsg struct {
+	prs      []prs.PR
+	warnings []string
+}
 
 type workflowEditorResponseMsg struct {
 	chatMessage     string
@@ -334,6 +342,28 @@ func fetchStandupData(client *jira.Client, days int) tea.Cmd {
 			completed: completedResp.Issues,
 			wip:       wipResp.Issues,
 		}
+	}
+}
+
+// fetchPRs aggregates PRs across Gerrit and GitHub for the given scope.
+func fetchPRs(scope string) tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := prs.LoadConfig()
+		if err != nil {
+			return errMsg{err: fmt.Errorf("failed to load [prs] config: %w", err)}
+		}
+		var list []prs.PR
+		var errs []error
+		if scope == "team" {
+			list, errs = prs.Team(cfg, prs.Options{Source: "all", Limit: 25})
+		} else {
+			list, errs = prs.Mine(cfg, prs.Options{Source: "all", Limit: 25})
+		}
+		warnings := make([]string, 0, len(errs))
+		for _, e := range errs {
+			warnings = append(warnings, e.Error())
+		}
+		return prsLoadedMsg{prs: list, warnings: warnings}
 	}
 }
 

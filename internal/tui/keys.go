@@ -43,6 +43,7 @@ type dashboardKeyMap struct {
 	Tasks      key.Binding
 	Workflow   key.Binding
 	Standup    key.Binding
+	PRs        key.Binding
 }
 
 var dashboardKeys = dashboardKeyMap{
@@ -113,6 +114,10 @@ var dashboardKeys = dashboardKeyMap{
 	Standup: key.NewBinding(
 		key.WithKeys("S"),
 		key.WithHelp("S", "standup"),
+	),
+	PRs: key.NewBinding(
+		key.WithKeys("P"),
+		key.WithHelp("P", "pull requests"),
 	),
 }
 

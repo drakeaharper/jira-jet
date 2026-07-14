@@ -25,6 +25,7 @@ const (
 	viewTaskViewer
 	viewWorkflowEditor
 	viewStandup
+	viewPRs
 )
 
 // App is the top-level Bubble Tea model.
@@ -43,6 +44,7 @@ type App struct {
 	taskViewer     TaskViewerModel
 	workflowEditor WorkflowEditorModel
 	standup        StandupModel
+	prs            PRsModel
 
 	taskManager  *TaskManager
 	notification string
@@ -111,6 +113,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.workflowEditor = a.workflowEditor.SetSize(a.width, contentHeight)
 		case viewStandup:
 			a.standup = a.standup.SetSize(a.width, contentHeight)
+		case viewPRs:
+			a.prs = a.prs.SetSize(a.width, contentHeight)
 		}
 		return a, nil
 
@@ -358,6 +362,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.standup = a.standup.SetData(msg.completed, msg.wip)
 		return a, nil
 
+	case navigateToPRsMsg:
+		// If already on the PR view (tab-toggle), swap scope in place instead of stacking.
+		if a.activeView != viewPRs {
+			a.viewStack = append(a.viewStack, a.activeView)
+		}
+		a.activeView = viewPRs
+		a.prs = NewPRsModel(msg.scope)
+		a.prs = a.prs.SetSize(a.width, a.height-2)
+		return a, tea.Batch(a.prs.Init(), fetchPRs(msg.scope))
+
+	case prsLoadedMsg:
+		a.prs = a.prs.SetData(msg.prs, msg.warnings)
+		return a, nil
+
 	case standupSummaryMsg:
 		a.standup = a.standup.SetSummary(msg.summary, msg.err)
 		return a, nil
@@ -417,6 +435,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewStandup:
 		a.standup, cmd = a.standup.Update(msg, a.client)
 		cmds = append(cmds, cmd)
+	case viewPRs:
+		a.prs, cmd = a.prs.Update(msg, nil)
+		cmds = append(cmds, cmd)
 	}
 
 	return a, tea.Batch(cmds...)
@@ -437,6 +458,8 @@ func (a App) View() string {
 		content = a.workflowEditor.View()
 	case viewStandup:
 		content = a.standup.View()
+	case viewPRs:
+		content = a.prs.View()
 	case viewTransition:
 		// Render transition overlay on top of the previous view
 		var bg string
@@ -575,7 +598,7 @@ func (a App) helpBar() string {
 		if a.dashboard.promptMode != promptNone {
 			return prefix + helpBarStyle.Render(" enter:confirm  esc:cancel")
 		}
-		base := " enter:view  o:open  x:epic  E:epics  S:standup  C:claude  T:tasks  W:workflow  c:create  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
+		base := " enter:view  o:open  x:epic  E:epics  S:standup  P:prs  C:claude  T:tasks  W:workflow  c:create  e:edit  t:transition  s:start  d:done  g:grab  r:refresh  q:quit"
 		if a.dashboard.viewingProjectEpics != "" {
 			base = " enter:view  m:my tickets  a:show/hide closed  x:epic  o:open  e:edit  t:transition  r:refresh  q:quit"
 		} else if a.dashboard.viewingEpic != "" {
@@ -610,6 +633,8 @@ func (a App) helpBar() string {
 		}
 	case viewStandup:
 		bar = helpBarStyle.Render(" j/k:navigate  enter:view issue  s:summarize  r:refresh  u:back")
+	case viewPRs:
+		bar = helpBarStyle.Render(" j/k:navigate  enter/o:open in browser  tab:mine/team  r:refresh  u:back")
 	case viewTaskViewer:
 		if a.taskViewer.picker.InWorkflowPhase() {
 			return prefix + helpBarStyle.Render(" j/k:navigate  enter:select  esc:cancel")
