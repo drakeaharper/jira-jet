@@ -113,6 +113,15 @@ jet prs team --json
 jet tui
 ```
 
+Manage the scanned GitHub repos without hand-editing the config:
+
+```bash
+jet prs repos                              # list configured repos
+jet prs repos add instructure/canvas-lms   # add (validated via gh, deduped)
+jet prs repos add owner/a owner/b          # add several at once
+jet prs repos rm owner/a                    # remove
+```
+
 ### View a ticket
 
 ```bash

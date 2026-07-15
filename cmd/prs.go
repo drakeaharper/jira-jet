@@ -8,6 +8,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"jet/internal/github"
 	"jet/internal/prs"
 )
 
@@ -45,6 +46,79 @@ var prsTeamCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPRs(prs.Team, "PRs awaiting your review")
 	},
+}
+
+var prsReposCmd = &cobra.Command{
+	Use:   "repos",
+	Short: "Manage the GitHub repos scanned by `jet prs`",
+	Long: `List, add, or remove the GitHub repos (owner/repo) that jet prs scans.
+Repos are stored in the github_repos entry of the [prs] section of
+~/.jira_config. Run with no subcommand to list them.`,
+	RunE: func(cmd *cobra.Command, args []string) error { return runReposList() },
+}
+
+var prsReposAddCmd = &cobra.Command{
+	Use:   "add <owner/repo>...",
+	Short: "Add one or more GitHub repos",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		for _, arg := range args {
+			norm, err := prs.NormalizeRepo(arg)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, color.YellowString("! %s: %v", arg, err))
+				continue
+			}
+			if github.Available() && !github.RepoExists(norm) {
+				fmt.Fprintln(os.Stderr, color.YellowString("! %s not found or not accessible via gh — skipping", norm))
+				continue
+			}
+			if _, err := prs.AddRepo(norm); err != nil {
+				fmt.Fprintln(os.Stderr, color.YellowString("! %v", err))
+				continue
+			}
+			fmt.Println(color.GreenString("+ added %s", norm))
+		}
+		return runReposList()
+	},
+}
+
+var prsReposRmCmd = &cobra.Command{
+	Use:     "rm <owner/repo>...",
+	Aliases: []string{"remove"},
+	Short:   "Remove one or more GitHub repos",
+	Args:    cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		for _, arg := range args {
+			repos, err := prs.RemoveRepo(arg)
+			_ = repos
+			if err != nil {
+				fmt.Fprintln(os.Stderr, color.YellowString("! %v", err))
+				continue
+			}
+			norm, _ := prs.NormalizeRepo(arg)
+			fmt.Println(color.RedString("- removed %s", norm))
+		}
+		return runReposList()
+	},
+}
+
+func runReposList() error {
+	repos, err := prs.ConfiguredRepos()
+	if err != nil {
+		return fmt.Errorf("failed to read config: %w", err)
+	}
+	if env := os.Getenv("JET_PRS_GITHUB_REPOS"); env != "" {
+		fmt.Println(color.YellowString("Note: JET_PRS_GITHUB_REPOS is set and overrides the config file at runtime."))
+	}
+	if len(repos) == 0 {
+		fmt.Println("No GitHub repos configured. Add one with: jet prs repos add owner/repo")
+		return nil
+	}
+	color.New(color.Bold).Printf("GitHub repos (%d)\n", len(repos))
+	for _, r := range repos {
+		fmt.Printf("  %s\n", r)
+	}
+	return nil
 }
 
 func runPRs(fetch func(*prs.Config, prs.Options) ([]prs.PR, []error), heading string) error {
@@ -134,7 +208,8 @@ func truncate(s string, n int) string {
 
 func init() {
 	rootCmd.AddCommand(prsCmd)
-	prsCmd.AddCommand(prsMineCmd, prsTeamCmd)
+	prsCmd.AddCommand(prsMineCmd, prsTeamCmd, prsReposCmd)
+	prsReposCmd.AddCommand(prsReposAddCmd, prsReposRmCmd)
 
 	for _, c := range []*cobra.Command{prsMineCmd, prsTeamCmd} {
 		c.Flags().StringVar(&prsSource, "source", "all", "Which source to query (all, gerrit, github)")

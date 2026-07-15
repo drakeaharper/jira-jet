@@ -32,6 +32,12 @@ func Available() bool {
 	return err == nil
 }
 
+// RepoExists reports whether the given owner/repo is visible to the
+// authenticated gh user.
+func RepoExists(repo string) bool {
+	return exec.Command("gh", "repo", "view", repo, "--json", "name").Run() == nil
+}
+
 // listRepo runs `gh pr list` for one repo with an optional extra --search filter.
 func listRepo(repo, search string, limit int) ([]PR, error) {
 	args := []string{
