@@ -12,6 +12,12 @@ A blazing fast command-line interface for JIRA operations. Written in Go, compil
 - **Link tickets**: Create relationships between tickets (blocks, relates-to, duplicates, etc.)
 - **Epic management**: List child tickets of an epic
 
+### Pull Requests
+- **Cross-system aggregation**: `jet prs mine` / `jet prs team` unify open changes from Gerrit (via [gerry](https://github.com/drakeaharper/gerrit-cli)'s credentials) and pull requests from GitHub (via the `gh` CLI)
+- **Reviewability split**: PRs are marked reviewable or blocked using gerry's rules — merge conflicts and blocking negative votes (Code-Review ≤ -1, QA-Review ≤ -1, Lint-Review ≤ -2) on Gerrit; drafts, changes-requested, and merge conflicts on GitHub
+- **Grouped by source and repo**: output groups by gerrit/github then repo, reviewable PRs first
+- **TUI view**: press `P` in `jet tui` for the same view (`tab` toggles mine/team, `enter` opens in browser)
+
 ### Confluence
 - **View pages**: Fetch and display Confluence pages
 - **Create pages**: Create new pages with content
@@ -70,7 +76,42 @@ email = your.email@company.com
 token = your-api-token
 ```
 
+For the PR commands, add a `[prs]` section. Gerrit auth and reviewability
+rules are read from gerry's own `~/.gerry/config.json` — this section only
+configures the GitHub repos to scan and an optional Gerrit team filter:
+
+```ini
+[prs]
+# Extra Gerrit query filter for `jet prs team` (optional)
+gerrit_filter = ownerin:learning-experience
+# GitHub repos (owner/repo) scanned for `jet prs mine` / `team`
+github_repos = instructure/canvas-lms,instructure/platform-ui
+```
+
+Both fields can be overridden with the `JET_PRS_GERRIT_FILTER` and
+`JET_PRS_GITHUB_REPOS` environment variables.
+
 ## Usage
+
+### Pull requests
+
+```bash
+# Your open PRs across Gerrit and GitHub, grouped by source/repo
+jet prs mine
+
+# PRs awaiting your review (reviewable first, blocked ones flagged)
+jet prs team
+
+# Limit to one source
+jet prs team --source gerrit
+jet prs mine --source github
+
+# Raw JSON (includes reviewable / block_reason fields)
+jet prs team --json
+
+# Interactive view in the TUI (press P; tab toggles mine/team)
+jet tui
+```
 
 ### View a ticket
 

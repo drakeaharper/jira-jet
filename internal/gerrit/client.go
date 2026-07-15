@@ -38,14 +38,64 @@ func (a Account) DisplayName() string {
 
 // Change is the subset of a Gerrit change jet displays.
 type Change struct {
-	Number  int                    `json:"_number"`
-	Project string                 `json:"project"`
-	Branch  string                 `json:"branch"`
-	Subject string                 `json:"subject"`
-	Status  string                 `json:"status"`
-	Updated string                 `json:"updated,omitempty"`
-	Owner   Account                `json:"owner"`
-	Labels  map[string]interface{} `json:"labels,omitempty"`
+	Number    int                    `json:"_number"`
+	Project   string                 `json:"project"`
+	Branch    string                 `json:"branch"`
+	Subject   string                 `json:"subject"`
+	Status    string                 `json:"status"`
+	Updated   string                 `json:"updated,omitempty"`
+	Owner     Account                `json:"owner"`
+	Labels    map[string]interface{} `json:"labels,omitempty"`
+	Mergeable *bool                  `json:"mergeable,omitempty"`
+}
+
+// MergeableState reports whether Gerrit supplied a mergeable value and what it
+// was. known is false when the server did not compute it.
+func (c Change) MergeableState() (known, mergeable bool) {
+	if c.Mergeable == nil {
+		return false, false
+	}
+	return true, *c.Mergeable
+}
+
+// MinLabelVote returns the lowest vote recorded for a label (from DETAILED_LABELS
+// "all"), falling back to the "rejected" summary. hasVote is false when nobody
+// has voted on the label.
+func (c Change) MinLabelVote(label string) (hasVote bool, min int) {
+	raw, ok := c.Labels[label]
+	if !ok {
+		return false, 0
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return false, 0
+	}
+	if all, ok := m["all"].([]interface{}); ok {
+		for _, v := range all {
+			vm, ok := v.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			score, ok := vm["value"].(float64)
+			if !ok {
+				continue
+			}
+			if !hasVote || int(score) < min {
+				min = int(score)
+			}
+			hasVote = true
+		}
+	}
+	if !hasVote {
+		if rejected, ok := m["rejected"].(map[string]interface{}); ok {
+			v := -1
+			if value, ok := rejected["value"].(float64); ok {
+				v = int(value)
+			}
+			return true, v
+		}
+	}
+	return hasVote, min
 }
 
 // LabelVote returns the net vote for a label (e.g. "Code-Review"): the max

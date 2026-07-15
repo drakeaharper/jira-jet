@@ -71,29 +71,42 @@ func runPRs(fetch func(*prs.Config, prs.Options) ([]prs.PR, []error), heading st
 		return nil
 	}
 
-	color.New(color.Bold).Printf("%s (%d)\n", heading, len(list))
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	bold := color.New(color.Bold)
+	reviewable := 0
 	for _, p := range list {
-		src := color.CyanString("gerrit")
-		id := fmt.Sprintf("!%d", p.Number)
-		if p.Source == prs.SourceGitHub {
-			src = color.MagentaString("github")
-			id = fmt.Sprintf("#%d", p.Number)
+		if p.Reviewable {
+			reviewable++
 		}
-		title := p.Title
-		if p.Draft {
-			title = color.HiBlackString("[draft] ") + title
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			src,
-			bold.Sprintf("%s %s", p.Repo, id),
-			truncate(title, 50),
-			statusColor(p.Status),
-			p.Author,
-		)
 	}
-	return w.Flush()
+	color.New(color.Bold).Printf("%s — %d total, %d reviewable\n\n", heading, len(list), reviewable)
+
+	for _, g := range prs.GroupBySourceRepo(list) {
+		src := color.CyanString("gerrit")
+		if g.Source == prs.SourceGitHub {
+			src = color.MagentaString("github")
+		}
+		color.New(color.Bold).Printf("%s · %s (%d)\n", src, g.Repo, len(g.PRs))
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		for _, p := range g.PRs {
+			id := fmt.Sprintf("!%d", p.Number)
+			if p.Source == prs.SourceGitHub {
+				id = fmt.Sprintf("#%d", p.Number)
+			}
+			title := truncate(p.Title, 50)
+			marker := ""
+			if !p.Reviewable {
+				// Dim the whole row and tag it with the reason.
+				id = color.HiBlackString(id)
+				title = color.HiBlackString(title)
+				marker = color.HiBlackString(fmt.Sprintf("(blocked: %s)", p.BlockReason))
+			}
+			fmt.Fprintf(w, "    %s\t%s\t%s\t%s\t%s\n",
+				id, title, statusColor(p.Status), p.Author, marker)
+		}
+		w.Flush()
+		fmt.Println()
+	}
+	return nil
 }
 
 func statusColor(s string) string {

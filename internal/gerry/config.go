@@ -9,13 +9,47 @@ import (
 	"path/filepath"
 )
 
-// Config mirrors the subset of ~/.gerry/config.json that jet needs for REST auth.
+// Config mirrors the subset of ~/.gerry/config.json that jet needs: REST auth
+// plus the reviewability rules, so jet's PR split matches `gerry team`.
 type Config struct {
-	Server       string `json:"server"`
-	Port         int    `json:"port"`
-	HTTPPort     int    `json:"http_port"`
-	User         string `json:"user"`
-	HTTPPassword string `json:"http_password"`
+	Server        string        `json:"server"`
+	Port          int           `json:"port"`
+	HTTPPort      int           `json:"http_port"`
+	User          string        `json:"user"`
+	HTTPPassword  string        `json:"http_password"`
+	Reviewability Reviewability `json:"reviewability,omitempty"`
+}
+
+// Reviewability controls which conditions mark a change as not reviewable,
+// mirroring gerry's own config shape.
+type Reviewability struct {
+	// BlockMergeConflict, when set, controls whether a merge conflict makes a
+	// change not reviewable. Nil falls back to the default (true).
+	BlockMergeConflict *bool `json:"block_merge_conflict,omitempty"`
+	// BlockingLabels maps a label to the vote threshold at or below which the
+	// change is not reviewable. Nil falls back to DefaultBlockingLabels.
+	BlockingLabels map[string]int `json:"blocking_labels,omitempty"`
+}
+
+// DefaultBlockingLabels reproduces gerry's built-in rules: Code-Review and
+// QA-Review block at -1 or below, Lint-Review only at -2.
+var DefaultBlockingLabels = map[string]int{
+	"Code-Review": -1,
+	"QA-Review":   -1,
+	"Lint-Review": -2,
+}
+
+// ReviewabilityRules returns the effective settings with defaults applied.
+func (c *Config) ReviewabilityRules() (blockMergeConflict bool, blockingLabels map[string]int) {
+	blockMergeConflict = true
+	if c.Reviewability.BlockMergeConflict != nil {
+		blockMergeConflict = *c.Reviewability.BlockMergeConflict
+	}
+	blockingLabels = c.Reviewability.BlockingLabels
+	if blockingLabels == nil {
+		blockingLabels = DefaultBlockingLabels
+	}
+	return blockMergeConflict, blockingLabels
 }
 
 // Load reads ~/.gerry/config.json.

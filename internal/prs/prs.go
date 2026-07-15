@@ -21,15 +21,61 @@ const (
 
 // PR is a system-agnostic pull request / change.
 type PR struct {
-	Source  Source `json:"source"`
-	Number  int    `json:"number"`
-	Title   string `json:"title"`
-	Repo    string `json:"repo"`
-	Author  string `json:"author"`
-	URL     string `json:"url"`
-	Status  string `json:"status"`  // human-readable review/merge state
-	Draft   bool   `json:"draft"`
-	Updated string `json:"updated"` // raw upstream timestamp
+	Source      Source `json:"source"`
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	Repo        string `json:"repo"`
+	Author      string `json:"author"`
+	URL         string `json:"url"`
+	Status      string `json:"status"` // human-readable review/merge state
+	Draft       bool   `json:"draft"`
+	Updated     string `json:"updated"`               // raw upstream timestamp
+	Reviewable  bool   `json:"reviewable"`            // false when blocked (see BlockReason)
+	BlockReason string `json:"block_reason,omitempty"` // why not reviewable, e.g. "CR-1", "draft"
+}
+
+// Group is a set of PRs sharing a source and repo, ordered reviewable-first.
+type Group struct {
+	Source Source `json:"source"`
+	Repo   string `json:"repo"`
+	PRs    []PR   `json:"prs"`
+}
+
+// GroupBySourceRepo buckets PRs by (source, repo). Groups are ordered gerrit
+// before github, then by repo name; within a group, reviewable PRs come first,
+// then most-recently-updated.
+func GroupBySourceRepo(list []PR) []Group {
+	index := map[string]*Group{}
+	var order []string
+	for _, p := range list {
+		key := string(p.Source) + "\x00" + p.Repo
+		g, ok := index[key]
+		if !ok {
+			g = &Group{Source: p.Source, Repo: p.Repo}
+			index[key] = g
+			order = append(order, key)
+		}
+		g.PRs = append(g.PRs, p)
+	}
+
+	groups := make([]Group, 0, len(order))
+	for _, key := range order {
+		g := index[key]
+		sort.SliceStable(g.PRs, func(i, j int) bool {
+			if g.PRs[i].Reviewable != g.PRs[j].Reviewable {
+				return g.PRs[i].Reviewable // reviewable first
+			}
+			return g.PRs[i].Updated > g.PRs[j].Updated
+		})
+		groups = append(groups, *g)
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].Source != groups[j].Source {
+			return groups[i].Source == SourceGerrit // gerrit groups first
+		}
+		return groups[i].Repo < groups[j].Repo
+	})
+	return groups
 }
 
 // Options controls which sources are queried and how many results per source.
@@ -74,8 +120,9 @@ func collect(cfg *Config, opts Options, gerritQuery string, ghList func([]string
 				errs = append(errs, fmt.Errorf("gerrit: %w", err))
 			} else {
 				base := gerritWebBase(gcfg)
+				blockConflict, blockingLabels := gcfg.ReviewabilityRules()
 				for _, ch := range changes {
-					out = append(out, fromChange(ch, base))
+					out = append(out, fromChange(ch, base, blockConflict, blockingLabels))
 				}
 			}
 		}
@@ -101,17 +148,53 @@ func collect(cfg *Config, opts Options, gerritQuery string, ghList func([]string
 	return out, errs
 }
 
-func fromChange(ch gerrit.Change, webBase string) PR {
+func fromChange(ch gerrit.Change, webBase string, blockConflict bool, blockingLabels map[string]int) PR {
+	reviewable, reason := gerritReviewable(ch, blockConflict, blockingLabels)
 	return PR{
-		Source:  SourceGerrit,
-		Number:  ch.Number,
-		Title:   ch.Subject,
-		Repo:    ch.Project,
-		Author:  ch.Owner.DisplayName(),
-		URL:     fmt.Sprintf("%s/c/%s/+/%d", webBase, ch.Project, ch.Number),
-		Status:  gerritStatus(ch),
-		Updated: ch.Updated,
+		Source:      SourceGerrit,
+		Number:      ch.Number,
+		Title:       ch.Subject,
+		Repo:        ch.Project,
+		Author:      ch.Owner.DisplayName(),
+		URL:         fmt.Sprintf("%s/c/%s/+/%d", webBase, ch.Project, ch.Number),
+		Status:      gerritStatus(ch),
+		Updated:     ch.Updated,
+		Reviewable:  reviewable,
+		BlockReason: reason,
 	}
+}
+
+// gerritReviewable applies gerry's reviewability rules: a merge conflict or a
+// blocking negative vote makes a change not reviewable. Unknown mergeability
+// does not disqualify.
+func gerritReviewable(ch gerrit.Change, blockConflict bool, blockingLabels map[string]int) (bool, string) {
+	if blockConflict {
+		if known, mergeable := ch.MergeableState(); known && !mergeable {
+			return false, "merge conflict"
+		}
+	}
+	for label, threshold := range blockingLabels {
+		if hasVote, min := ch.MinLabelVote(label); hasVote && min <= threshold {
+			return false, labelReason(label, min)
+		}
+	}
+	return true, ""
+}
+
+// labelReason renders a compact reason like "CR-1" from a label + vote.
+func labelReason(label string, vote int) string {
+	abbr := label
+	switch label {
+	case "Code-Review":
+		abbr = "CR"
+	case "QA-Review":
+		abbr = "QR"
+	case "Lint-Review":
+		abbr = "LR"
+	case "Verified":
+		abbr = "V"
+	}
+	return fmt.Sprintf("%s%+d", abbr, vote)
 }
 
 func gerritStatus(ch gerrit.Change) string {
@@ -138,16 +221,31 @@ func fromGitHub(p github.PR) PR {
 	case "REVIEW_REQUIRED", "":
 		status = "needs review"
 	}
+
+	// A GitHub PR is not reviewable when the author still owes work: it's a
+	// draft, changes were requested, or it has a merge conflict.
+	reviewable, reason := true, ""
+	switch {
+	case p.IsDraft:
+		reviewable, reason = false, "draft"
+	case p.ReviewDecision == "CHANGES_REQUESTED":
+		reviewable, reason = false, "changes requested"
+	case p.Mergeable == "CONFLICTING":
+		reviewable, reason = false, "merge conflict"
+	}
+
 	return PR{
-		Source:  SourceGitHub,
-		Number:  p.Number,
-		Title:   p.Title,
-		Repo:    p.Repo,
-		Author:  p.Author.Login,
-		URL:     p.URL,
-		Status:  status,
-		Draft:   p.IsDraft,
-		Updated: p.UpdatedAt,
+		Source:      SourceGitHub,
+		Number:      p.Number,
+		Title:       p.Title,
+		Repo:        p.Repo,
+		Author:      p.Author.Login,
+		URL:         p.URL,
+		Status:      status,
+		Draft:       p.IsDraft,
+		Updated:     p.UpdatedAt,
+		Reviewable:  reviewable,
+		BlockReason: reason,
 	}
 }
 

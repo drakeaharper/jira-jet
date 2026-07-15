@@ -16,6 +16,7 @@ type PR struct {
 	State          string `json:"state"`
 	IsDraft        bool   `json:"isDraft"`
 	ReviewDecision string `json:"reviewDecision"`
+	Mergeable      string `json:"mergeable"` // MERGEABLE, CONFLICTING, or UNKNOWN
 	UpdatedAt      string `json:"updatedAt"`
 	Author         struct {
 		Login string `json:"login"`
@@ -23,7 +24,7 @@ type PR struct {
 	Repo string `json:"-"` // filled in by caller (gh doesn't return it per-item here)
 }
 
-const jsonFields = "number,title,url,state,isDraft,reviewDecision,updatedAt,author"
+const jsonFields = "number,title,url,state,isDraft,reviewDecision,mergeable,updatedAt,author"
 
 // Available reports whether the gh CLI is installed.
 func Available() bool {
