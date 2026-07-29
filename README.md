@@ -86,10 +86,29 @@ configures the GitHub repos to scan and an optional Gerrit team filter:
 gerrit_filter = ownerin:learning-experience
 # GitHub repos (owner/repo) scanned for `jet prs mine` / `team`
 github_repos = instructure/canvas-lms,instructure/platform-ui
+# Who counts as your team on GitHub for `jet prs team --scope all` (optional).
+# Pick one: a GitHub team to expand, or an explicit login list.
+github_team = instructure-internal/learningexperience-team
+# github_authors = alice,bob,carol
 ```
 
-Both fields can be overridden with the `JET_PRS_GERRIT_FILTER` and
-`JET_PRS_GITHUB_REPOS` environment variables.
+Every field can be overridden with the `JET_PRS_GERRIT_FILTER`,
+`JET_PRS_GITHUB_REPOS`, `JET_PRS_GITHUB_TEAM` and `JET_PRS_GITHUB_AUTHORS`
+environment variables.
+
+#### Team-wide scope
+
+`jet prs team` defaults to PRs that explicitly request your review. `--scope
+all` widens it to everything your team has open, including changes nobody
+added you to. Each source needs a bound so the query doesn't run away:
+
+| Source | Bound by | If unset |
+|--------|----------|----------|
+| Gerrit | `gerrit_filter` | `--scope all` refuses to run (it would match every open change on the server) |
+| GitHub | `github_team` or `github_authors` | Falls back to every open PR in `github_repos` except your own |
+
+`github_authors` wins when both are set and needs no API call — useful if
+your `gh` token lacks the `read:org` scope required to expand a team.
 
 ## Usage
 
@@ -101,6 +120,9 @@ jet prs mine
 
 # PRs awaiting your review (reviewable first, blocked ones flagged)
 jet prs team
+
+# Everything your team has open, whether or not you were added as a reviewer
+jet prs team --scope all
 
 # Limit to one source
 jet prs team --source gerrit

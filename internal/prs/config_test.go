@@ -29,11 +29,11 @@ func read(t *testing.T, path string) string {
 
 func TestNormalizeRepo(t *testing.T) {
 	cases := map[string]string{
-		"owner/repo":                      "owner/repo",
-		"  owner/repo  ":                  "owner/repo",
-		"https://github.com/owner/repo":   "owner/repo",
+		"owner/repo":                        "owner/repo",
+		"  owner/repo  ":                    "owner/repo",
+		"https://github.com/owner/repo":     "owner/repo",
 		"https://github.com/owner/repo.git": "owner/repo",
-		"owner/repo/":                     "owner/repo",
+		"owner/repo/":                       "owner/repo",
 	}
 	for in, want := range cases {
 		got, err := NormalizeRepo(in)
@@ -124,5 +124,51 @@ func TestAddWhenNoConfigFile(t *testing.T) {
 	out := read(t, filepath.Join(dir, ".jira_config"))
 	if !strings.Contains(out, "[prs]") || !strings.Contains(out, "github_repos = owner/a") {
 		t.Errorf("should create config file:\n%s", out)
+	}
+}
+
+func TestLoadConfigTeamKeys(t *testing.T) {
+	writeConfig(t, `[jira]
+url = https://example.atlassian.net
+
+[prs]
+gerrit_filter = ownerin:lx
+github_repos = org/a,org/b
+github_team = org/learning-experience
+github_authors = alice, bob
+`)
+	// Clear env so the file is what's under test.
+	for _, k := range []string{"JET_PRS_GERRIT_FILTER", "JET_PRS_GITHUB_REPOS", "JET_PRS_GITHUB_TEAM", "JET_PRS_GITHUB_AUTHORS"} {
+		t.Setenv(k, "")
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GitHubTeam != "org/learning-experience" {
+		t.Errorf("github_team = %q", cfg.GitHubTeam)
+	}
+	if strings.Join(cfg.GitHubAuthors, ",") != "alice,bob" {
+		t.Errorf("github_authors = %v (want trimmed alice,bob)", cfg.GitHubAuthors)
+	}
+	if !cfg.TeamAuthorsConfigured() {
+		t.Error("TeamAuthorsConfigured() should be true")
+	}
+	if (&Config{}).TeamAuthorsConfigured() {
+		t.Error("empty config should not report a team")
+	}
+}
+
+func TestLoadConfigTeamEnvOverride(t *testing.T) {
+	writeConfig(t, "[prs]\ngithub_team = org/from-file\n")
+	t.Setenv("JET_PRS_GITHUB_TEAM", "org/from-env")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GitHubTeam != "org/from-env" {
+		t.Errorf("env should win: got %q", cfg.GitHubTeam)
 	}
 }

@@ -5,6 +5,7 @@ package prs
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"jet/internal/gerrit"
 	"jet/internal/gerry"
@@ -78,27 +79,133 @@ func GroupBySourceRepo(list []PR) []Group {
 	return groups
 }
 
+// Scope values for Team: which of your teammates' PRs count.
+const (
+	// ScopeRequested surfaces only PRs that name you as reviewer or CC.
+	ScopeRequested = "requested"
+	// ScopeAll surfaces every open PR from the team, requested or not.
+	ScopeAll = "all"
+)
+
 // Options controls which sources are queried and how many results per source.
 type Options struct {
 	Source string // "all", "gerrit", or "github"
+	Scope  string // Team only: "requested" (default) or "all"
 	Limit  int
 }
 
 func (o Options) wantGerrit() bool { return o.Source == "" || o.Source == "all" || o.Source == "gerrit" }
 func (o Options) wantGitHub() bool { return o.Source == "" || o.Source == "all" || o.Source == "github" }
 
+func (o Options) scopeAll() bool { return o.Scope == ScopeAll }
+
+// ValidateScope rejects an unrecognized --scope value. Empty means requested.
+func ValidateScope(scope string) error {
+	switch scope {
+	case "", ScopeRequested, ScopeAll:
+		return nil
+	}
+	return fmt.Errorf("invalid scope %q (want %s or %s)", scope, ScopeRequested, ScopeAll)
+}
+
 // Mine returns your open PRs across the configured sources.
 func Mine(cfg *Config, opts Options) ([]PR, []error) {
 	return collect(cfg, opts, "owner:self is:open -is:wip", github.Authored)
 }
 
-// Team returns open PRs awaiting your review across the configured sources.
+// Team returns open PRs from your teammates across the configured sources. By
+// default only PRs that request your review; with Scope == ScopeAll, every open
+// PR the configured filters cover, whether or not you were added.
 func Team(cfg *Config, opts Options) ([]PR, []error) {
-	q := fmt.Sprintf("is:open -is:wip -is:ignored -owner:self (reviewer:self OR cc:self)")
+	if err := ValidateScope(opts.Scope); err != nil {
+		return nil, []error{err}
+	}
+
+	var pre []error
+	ghList := github.ReviewRequested
+	if opts.scopeAll() {
+		authors, err := teamGitHubAuthors(cfg, opts)
+		if err != nil {
+			pre = append(pre, err)
+		}
+		ghList = func(repos []string, limit int) ([]github.PR, error) {
+			return github.ByAuthors(repos, authors, limit)
+		}
+	}
+
+	q, err := teamGerritQuery(cfg, opts)
+	if err != nil {
+		pre = append(pre, err)
+		if !opts.wantGitHub() {
+			return nil, pre
+		}
+		// Skip Gerrit but still let GitHub through — partial results are useful.
+		list, errs := collect(cfg, Options{Source: "github", Limit: opts.Limit}, "", ghList)
+		return list, append(pre, errs...)
+	}
+	list, errs := collect(cfg, opts, q, ghList)
+	return list, append(pre, errs...)
+}
+
+// teamGitHubAuthors resolves which GitHub logins count as your team for
+// --scope all. github_authors wins if set; otherwise github_team is expanded
+// via the API. With neither configured, an empty list means "every open PR but
+// your own". A resolution failure is returned alongside an empty list so the
+// caller can warn and fall back rather than showing nothing.
+func teamGitHubAuthors(cfg *Config, opts Options) ([]string, error) {
+	if !opts.wantGitHub() || !cfg.TeamAuthorsConfigured() {
+		return nil, nil
+	}
+	authors := cfg.GitHubAuthors
+	if len(authors) == 0 {
+		members, err := github.TeamMembers(cfg.GitHubTeam)
+		if err != nil {
+			return nil, fmt.Errorf("github: %w — falling back to all open PRs; "+
+				"set github_authors in [prs] to skip team lookup", err)
+		}
+		authors = members
+	}
+	// A failure to resolve your login is not fatal; you just see your own PRs
+	// in the team list.
+	me, err := github.CurrentLogin()
+	if err != nil {
+		me = ""
+	}
+	return withoutSelf(authors, me), nil
+}
+
+// withoutSelf drops your own login from an author list. The GitHub query ORs
+// author terms, so self-exclusion cannot be expressed as a trailing
+// "-author:@me" — it has to happen here.
+func withoutSelf(authors []string, me string) []string {
+	if me == "" {
+		return authors
+	}
+	out := make([]string, 0, len(authors))
+	for _, a := range authors {
+		if !strings.EqualFold(strings.TrimSpace(a), me) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// teamGerritQuery builds the Gerrit side of the team query. Scope "all" drops
+// the reviewer/CC clause, which makes cfg.GerritFilter the only thing bounding
+// the search — so it is required there, or the query would match every open
+// change on the server.
+func teamGerritQuery(cfg *Config, opts Options) (string, error) {
+	q := "is:open -is:wip -is:ignored -owner:self"
+	if !opts.scopeAll() {
+		q += " (reviewer:self OR cc:self)"
+	} else if cfg.GerritFilter == "" {
+		return "", fmt.Errorf("gerrit: --scope all needs a gerrit_filter to bound the search " +
+			"(set gerrit_filter in the [prs] section of ~/.jira_config, e.g. ownerin:your-team)")
+	}
 	if cfg.GerritFilter != "" {
 		q = fmt.Sprintf("(%s) %s", q, cfg.GerritFilter)
 	}
-	return collect(cfg, opts, q, github.ReviewRequested)
+	return q, nil
 }
 
 // collect runs the gerrit query and the github lister, merging into unified PRs.

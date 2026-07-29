@@ -14,6 +14,7 @@ import (
 
 var (
 	prsSource string
+	prsScope  string
 	prsLimit  int
 	prsJSON   bool
 )
@@ -29,7 +30,16 @@ section of ~/.jira_config:
 
   [prs]
   gerrit_filter = ownerin:learning-experience
-  github_repos = instructure/canvas-lms,instructure/platform-ui`,
+  github_repos = instructure/canvas-lms,instructure/platform-ui
+
+To make "jet prs team --scope all" show only your team's GitHub PRs rather
+than every open PR in those repos, define the team one of two ways:
+
+  github_team = instructure-internal/learning-experience   # expanded via gh
+  github_authors = alice,bob,carol                         # explicit logins
+
+github_authors wins when both are set and needs no API call (useful if your
+gh token lacks read:org).`,
 }
 
 var prsMineCmd = &cobra.Command{
@@ -42,9 +52,22 @@ var prsMineCmd = &cobra.Command{
 
 var prsTeamCmd = &cobra.Command{
 	Use:   "team",
-	Short: "PRs awaiting your review across Gerrit and GitHub",
+	Short: "Your teammates' open PRs across Gerrit and GitHub",
+	Long: `List your teammates' open PRs across Gerrit and GitHub.
+
+By default only PRs that request your review (as reviewer or CC). Use
+--scope all to see every open PR from the team, including ones you were
+never added to. Team-wide scope needs gerrit_filter set in the [prs]
+section of ~/.jira_config to bound the Gerrit search.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPRs(prs.Team, "PRs awaiting your review")
+		if err := prs.ValidateScope(prsScope); err != nil {
+			return err
+		}
+		heading := "PRs awaiting your review"
+		if prsScope == prs.ScopeAll {
+			heading = "Team PRs"
+		}
+		return runPRs(prs.Team, heading)
 	},
 }
 
@@ -127,7 +150,7 @@ func runPRs(fetch func(*prs.Config, prs.Options) ([]prs.PR, []error), heading st
 		return fmt.Errorf("failed to load [prs] config: %w", err)
 	}
 
-	list, errs := fetch(cfg, prs.Options{Source: prsSource, Limit: prsLimit})
+	list, errs := fetch(cfg, prs.Options{Source: prsSource, Scope: prsScope, Limit: prsLimit})
 
 	if prsJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -216,4 +239,6 @@ func init() {
 		c.Flags().IntVarP(&prsLimit, "limit", "n", 25, "Max results per source")
 		c.Flags().BoolVar(&prsJSON, "json", false, "Output raw JSON")
 	}
+	prsTeamCmd.Flags().StringVar(&prsScope, "scope", prs.ScopeRequested,
+		"Which teammate PRs to show (requested, all)")
 }

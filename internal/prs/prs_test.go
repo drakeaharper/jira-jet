@@ -63,6 +63,87 @@ func TestFromGitHubReviewability(t *testing.T) {
 	}
 }
 
+func TestValidateScope(t *testing.T) {
+	for _, ok := range []string{"", ScopeRequested, ScopeAll} {
+		if err := ValidateScope(ok); err != nil {
+			t.Errorf("scope %q should be valid, got %v", ok, err)
+		}
+	}
+	if err := ValidateScope("everyone"); err == nil {
+		t.Error("scope \"everyone\" should be rejected")
+	}
+}
+
+func TestTeamGerritQuery(t *testing.T) {
+	tests := []struct {
+		name    string
+		filter  string
+		scope   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "requested scope keeps reviewer clause",
+			scope: ScopeRequested,
+			want:  "is:open -is:wip -is:ignored -owner:self (reviewer:self OR cc:self)",
+		},
+		{
+			name:   "requested scope ands the filter",
+			filter: "ownerin:lx",
+			scope:  ScopeRequested,
+			want:   "(is:open -is:wip -is:ignored -owner:self (reviewer:self OR cc:self)) ownerin:lx",
+		},
+		{
+			name:   "all scope drops reviewer clause",
+			filter: "ownerin:lx",
+			scope:  ScopeAll,
+			want:   "(is:open -is:wip -is:ignored -owner:self) ownerin:lx",
+		},
+		{
+			name:    "all scope without filter is refused",
+			scope:   ScopeAll,
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		got, err := teamGerritQuery(&Config{GerritFilter: tc.filter}, Options{Scope: tc.scope})
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("%s: expected an error, got query %q", tc.name, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: unexpected error %v", tc.name, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestTeamGitHubAuthors(t *testing.T) {
+	// Explicit authors win and require no API call.
+	cfg := &Config{GitHubAuthors: []string{"alice", "bob"}, GitHubTeam: "org/team"}
+	got, err := teamGitHubAuthors(cfg, Options{Scope: ScopeAll})
+	if err != nil || len(got) != 2 || got[0] != "alice" {
+		t.Errorf("explicit authors should win: got %v, err %v", got, err)
+	}
+
+	// Nothing configured → empty list (means "all but mine"), no error.
+	got, err = teamGitHubAuthors(&Config{}, Options{Scope: ScopeAll})
+	if err != nil || got != nil {
+		t.Errorf("unconfigured team should yield (nil, nil): got %v, err %v", got, err)
+	}
+
+	// Gerrit-only source must not trigger a GitHub team lookup.
+	got, err = teamGitHubAuthors(cfg, Options{Scope: ScopeAll, Source: "gerrit"})
+	if err != nil || got != nil {
+		t.Errorf("gerrit-only should skip author resolution: got %v, err %v", got, err)
+	}
+}
+
 func TestGroupBySourceRepo(t *testing.T) {
 	list := []PR{
 		{Source: SourceGitHub, Repo: "org/b", Number: 1, Reviewable: false, Updated: "2026-01-03"},
@@ -86,5 +167,17 @@ func TestGroupBySourceRepo(t *testing.T) {
 	// GitHub groups sorted by repo name: org/a before org/b.
 	if groups[1].Repo != "org/a" || groups[2].Repo != "org/b" {
 		t.Errorf("github repos should be alphabetical, got %s then %s", groups[1].Repo, groups[2].Repo)
+	}
+}
+
+func TestWithoutSelf(t *testing.T) {
+	in := []string{"alice", "DrakeAHarper", " bob "}
+	got := withoutSelf(in, "drakeaharper")
+	if len(got) != 2 || got[0] != "alice" || got[1] != " bob " {
+		t.Errorf("self should be dropped case-insensitively, got %v", got)
+	}
+	// Unresolvable login must not silently empty the list.
+	if len(withoutSelf(in, "")) != 3 {
+		t.Error("empty login should leave the list untouched")
 	}
 }

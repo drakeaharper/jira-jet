@@ -77,6 +77,75 @@ func ReviewRequested(repos []string, limit int) ([]PR, error) {
 	return listAcross(repos, "review-requested:@me", limit)
 }
 
+// NotAuthored returns every open PR across the repos except your own. Used for
+// team-wide scope, where a review request is not required to surface a PR.
+func NotAuthored(repos []string, limit int) ([]PR, error) {
+	return listAcross(repos, "-author:@me", limit)
+}
+
+// ByAuthors returns open PRs across the repos written by any of the given
+// logins. Callers should have already removed their own login from the list.
+//
+// GitHub search ANDs repeated qualifiers, so "author:a author:b" matches
+// nothing — a PR has exactly one author. The alternatives must be OR'd
+// explicitly. Note this means "-author:@me" cannot be appended: it would bind
+// to the last OR branch only.
+func ByAuthors(repos, authors []string, limit int) ([]PR, error) {
+	terms := make([]string, 0, len(authors))
+	for _, a := range authors {
+		if a = strings.TrimSpace(a); a != "" {
+			terms = append(terms, "author:"+a)
+		}
+	}
+	if len(terms) == 0 {
+		return NotAuthored(repos, limit)
+	}
+	return listAcross(repos, strings.Join(terms, " OR "), limit)
+}
+
+// CurrentLogin returns the authenticated gh user's login.
+func CurrentLogin() (string, error) {
+	out, err := exec.Command("gh", "api", "user", "--jq", ".login").Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve current gh user: %w", ghErr(err))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// TeamMembers expands an "org/team-slug" into member logins via the GitHub API.
+func TeamMembers(team string) ([]string, error) {
+	org, slug, ok := strings.Cut(strings.TrimSpace(team), "/")
+	if !ok || org == "" || slug == "" {
+		return nil, fmt.Errorf("expected org/team-slug, got %q", team)
+	}
+	path := fmt.Sprintf("orgs/%s/teams/%s/members", org, slug)
+	out, err := exec.Command("gh", "api", "--paginate", path, "--jq", ".[].login").Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list members of %s: %w", team, ghErr(err))
+	}
+	var logins []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if l := strings.TrimSpace(line); l != "" {
+			logins = append(logins, l)
+		}
+	}
+	if len(logins) == 0 {
+		return nil, fmt.Errorf("team %s has no visible members (does your gh token have read:org?)", team)
+	}
+	return logins, nil
+}
+
+// ghErr unwraps an exec failure into the stderr text gh produced, which is far
+// more useful than "exit status 1".
+func ghErr(err error) error {
+	if ee, ok := err.(*exec.ExitError); ok {
+		if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
+			return fmt.Errorf("%s", msg)
+		}
+	}
+	return err
+}
+
 func listAcross(repos []string, search string, limit int) ([]PR, error) {
 	var all []PR
 	var errs []string

@@ -17,6 +17,18 @@ func configPath() string {
 type Config struct {
 	GerritFilter string   // extra Gerrit query filter for `team`, e.g. "ownerin:learning-experience"
 	GitHubRepos  []string // owner/repo entries to scan for GitHub PRs
+	// GitHubTeam is an org/team-slug whose members define your team on GitHub,
+	// e.g. "instructure-internal/learning-experience". Expanded to logins via gh.
+	GitHubTeam string
+	// GitHubAuthors is an explicit login list, used instead of expanding
+	// GitHubTeam. Takes precedence when both are set.
+	GitHubAuthors []string
+}
+
+// TeamAuthorsConfigured reports whether the GitHub side of `--scope all` has a
+// team definition to narrow by, rather than falling back to every open PR.
+func (c *Config) TeamAuthorsConfigured() bool {
+	return len(c.GitHubAuthors) > 0 || c.GitHubTeam != ""
 }
 
 // LoadConfig reads the [prs] section from ~/.jira_config. A missing file or
@@ -30,6 +42,12 @@ func LoadConfig() (*Config, error) {
 	}
 	if v := os.Getenv("JET_PRS_GITHUB_REPOS"); v != "" {
 		cfg.GitHubRepos = splitRepos(v)
+	}
+	if v := os.Getenv("JET_PRS_GITHUB_TEAM"); v != "" {
+		cfg.GitHubTeam = v
+	}
+	if v := os.Getenv("JET_PRS_GITHUB_AUTHORS"); v != "" {
+		cfg.GitHubAuthors = splitRepos(v)
 	}
 
 	file, err := os.Open(configPath())
@@ -66,6 +84,14 @@ func LoadConfig() (*Config, error) {
 		case "github_repos":
 			if len(cfg.GitHubRepos) == 0 {
 				cfg.GitHubRepos = splitRepos(val)
+			}
+		case "github_team":
+			if cfg.GitHubTeam == "" {
+				cfg.GitHubTeam = val
+			}
+		case "github_authors":
+			if len(cfg.GitHubAuthors) == 0 {
+				cfg.GitHubAuthors = splitRepos(val)
 			}
 		}
 	}
