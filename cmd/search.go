@@ -21,6 +21,9 @@ var (
 	searchFormat     string
 	searchParams     []string
 	searchListFields bool
+	searchBoard      string
+	searchQuick      []string
+	searchShowJQL    bool
 )
 
 var searchCmd = &cobra.Command{
@@ -34,7 +37,8 @@ Examples:
   jet search 'project = FOUND' --fields '*all' --expand names --max 5 --format json
   jet search 'project = FOUND' --all --format json
   jet search 'labels = a11y' --param fieldsByKeys=true
-  jet search --list-fields`,
+  jet search --list-fields
+  jet search --board 12079 --quick-filter 21736,21746 'duedate <= 3d'`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
@@ -50,12 +54,27 @@ Examples:
 			}
 			return printFields(body)
 		}
-		if len(args) == 0 {
-			return fmt.Errorf("give a JQL query, or use --list-fields")
+		jql := ""
+		if len(args) == 1 {
+			jql = args[0]
+		}
+		if searchBoard != "" {
+			jql, err = boardJQL(client, searchBoard, searchQuick, jql)
+			if err != nil {
+				return err
+			}
+		} else if len(searchQuick) > 0 {
+			return fmt.Errorf("--quick-filter needs --board")
+		}
+		if jql == "" {
+			return fmt.Errorf("give a JQL query, --board, or --list-fields")
+		}
+		if searchShowJQL {
+			fmt.Fprintln(os.Stderr, "JQL:", jql)
 		}
 
 		params := url.Values{}
-		params.Set("jql", args[0])
+		params.Set("jql", jql)
 		params.Set("fields", searchFields)
 		if searchExpand != "" {
 			params.Set("expand", searchExpand)
@@ -147,5 +166,8 @@ func init() {
 	searchCmd.Flags().BoolVar(&searchAll, "all", false, "Fetch every page of results")
 	searchCmd.Flags().StringVar(&searchFormat, "format", "readable", "Output format (readable or json)")
 	searchCmd.Flags().StringArrayVar(&searchParams, "param", nil, "Extra search API parameter as key=value (repeatable)")
+	searchCmd.Flags().StringVar(&searchBoard, "board", "", "Start from this board's filter")
+	searchCmd.Flags().StringSliceVar(&searchQuick, "quick-filter", nil, "Board quick filter ids to apply (needs --board)")
+	searchCmd.Flags().BoolVar(&searchShowJQL, "show-jql", false, "Print the final JQL to stderr")
 	searchCmd.Flags().BoolVar(&searchListFields, "list-fields", false, "List every Jira field id, name, and type")
 }

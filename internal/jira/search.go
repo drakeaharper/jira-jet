@@ -51,3 +51,61 @@ func (c *Client) getRaw(endpoint, resource string) ([]byte, error) {
 	}
 	return body, nil
 }
+
+// QuickFilter is a board quick filter and its JQL.
+type QuickFilter struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	JQL         string `json:"jql"`
+	Description string `json:"description"`
+}
+
+// BoardQuickFilters returns every quick filter on a board.
+func (c *Client) BoardQuickFilters(boardID string) ([]QuickFilter, error) {
+	var all []QuickFilter
+	for start := 0; ; {
+		body, err := c.getRaw(fmt.Sprintf("/rest/agile/1.0/board/%s/quickfilter?startAt=%d", url.PathEscape(boardID), start), "board quick filters")
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Values []QuickFilter `json:"values"`
+			IsLast bool          `json:"isLast"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+		all = append(all, page.Values...)
+		if page.IsLast || len(page.Values) == 0 {
+			return all, nil
+		}
+		start += len(page.Values)
+	}
+}
+
+// BoardFilterJQL returns the JQL of the saved filter behind a board.
+func (c *Client) BoardFilterJQL(boardID string) (string, error) {
+	body, err := c.getRaw(fmt.Sprintf("/rest/agile/1.0/board/%s/configuration", url.PathEscape(boardID)), "board configuration")
+	if err != nil {
+		return "", err
+	}
+	var cfg struct {
+		Filter struct {
+			ID string `json:"id"`
+		} `json:"filter"`
+	}
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	body, err = c.getRaw("/rest/api/3/filter/"+url.PathEscape(cfg.Filter.ID), "board filter")
+	if err != nil {
+		return "", err
+	}
+	var f struct {
+		JQL string `json:"jql"`
+	}
+	if err := json.Unmarshal(body, &f); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	return f.JQL, nil
+}
