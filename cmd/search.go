@@ -32,13 +32,13 @@ var searchCmd = &cobra.Command{
 	Long: `Search Jira with any JQL and any parameter the search API supports.
 
 Examples:
-  jet search 'project = FOUND AND type = Bug AND statusCategory != Done'
+  jet search 'project = PROJ AND type = Bug AND statusCategory != Done'
   jet search 'assignee = currentUser()' --fields summary,status,customfield_10020 --format json
-  jet search 'project = FOUND' --fields '*all' --expand names --max 5 --format json
-  jet search 'project = FOUND' --all --format json
+  jet search 'project = PROJ' --fields '*all' --expand names --max 5 --format json
+  jet search 'project = PROJ' --all --format json
   jet search 'labels = a11y' --param fieldsByKeys=true
   jet search --list-fields
-  jet search --board 12079 --quick-filter 21736,21746 'duedate <= 3d'`,
+  jet search --board 123 --quick-filter 456,789 'duedate <= 3d'`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
