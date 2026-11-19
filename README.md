@@ -144,6 +144,18 @@ jet prs repos add owner/a owner/b          # add several at once
 jet prs repos rm owner/a                    # remove
 ```
 
+### Search with JQL
+
+```bash
+jet search 'project = PROJ AND type = Bug AND statusCategory != Done'
+jet search 'assignee = currentUser()' --fields '*all' --format json
+jet search --board 123 --quick-filter 456,789 'duedate <= 3d' --all
+jet search --list-fields
+jet board quickfilters 123
+```
+
+`--param key=value` passes any other search API parameter.
+
 ### View a ticket
 
 ```bash
